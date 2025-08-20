@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 資料庫
+  postgres:
+    image: postgres:15-alpine
+    container_name: conference_postgres_dev
+    environment:
+      POSTGRES_DB: conference_platform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    networks:
+      - conference_dev_network
+
+  # MinIO 物件儲存 (S3 相容)
+  minio:
+    image: minio/minio:latest
+    container_name: conference_minio_dev
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_dev_data:/data
+    networks:
+      - conference_dev_network
+
+  # MailHog SMTP 測試伺服器
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: conference_mailhog_dev
+    ports:
+      - "1025:1025"  # SMTP port
+      - "8025:8025"  # Web UI port
+    networks:
+      - conference_dev_network
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: conference_redis_dev
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    networks:
+      - conference_dev_network
+
+volumes:
+  postgres_dev_data:
+    driver: local
+  minio_dev_data:
+    driver: local
+  redis_dev_data:
+    driver: local
+
+networks:
+  conference_dev_network:
+    driver: bridge

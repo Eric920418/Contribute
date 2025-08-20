@@ -1,0 +1,334 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 使用者表
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String
+  emailVerifiedAt DateTime?
+  displayName     String
+  orcid           String?
+  mustChangePassword Boolean @default(false) // 是否需要強制改密碼
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // 關聯
+  roles                UserRole[]
+  submissionsCreated   Submission[]        @relation("SubmissionCreatedBy")
+  reviewAssignments    ReviewAssignment[]
+  decisionsCreated     Decision[]          @relation("DecisionCreatedBy")
+  auditLogsCreated        AuditLog[]                @relation("AuditLogActor")
+  passwordResetTokens     PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+
+  @@map("users")
+}
+
+// 角色表
+model Role {
+  id  String   @id @default(cuid())
+  key RoleType @unique
+  
+  // 關聯
+  users UserRole[]
+  
+  @@map("roles")
+}
+
+// 使用者角色關聯表
+model UserRole {
+  userId String
+  roleId String
+  
+  // 關聯
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+// 研討會表
+model Conference {
+  id       String  @id @default(cuid())
+  year     Int
+  title    String
+  tracks   Json    // 主題軌道配置
+  settings Json    // 研討會設定
+  isActive Boolean @default(false)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // 關聯
+  submissions Submission[]
+  
+  @@unique([year])
+  @@map("conferences")
+}
+
+// 投稿表
+model Submission {
+  id           String           @id @default(cuid())
+  conferenceId String
+  title        String
+  abstract     String           @db.Text
+  track        String
+  status       SubmissionStatus @default(DRAFT)
+  createdBy    String
+  decisionNote String?          @db.Text
+  serialNumber String?          @unique // 流水號
+  submittedAt  DateTime?        // 提交時間
+  
+  // 新增欄位
+  paperType    String?          // 論文類型
+  keywords     String?          @db.Text // 關鍵詞
+  
+  // 作者聲明
+  agreementOriginalWork         Boolean? @default(false) // 原創作品聲明
+  agreementNoConflictOfInterest Boolean? @default(false) // 無利益衝突聲明
+  agreementConsentToPublish     Boolean? @default(false) // 發表同意書
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // 關聯
+  conference        Conference         @relation(fields: [conferenceId], references: [id], onDelete: Cascade)
+  creator           User               @relation("SubmissionCreatedBy", fields: [createdBy], references: [id])
+  authors           SubmissionAuthor[]
+  files             FileAsset[]
+  reviewAssignments ReviewAssignment[]
+  decisions         Decision[]
+  
+  @@map("submissions")
+}
+
+// 投稿作者表
+model SubmissionAuthor {
+  id             String  @id @default(cuid())
+  submissionId   String
+  name           String
+  email          String
+  affiliation    String
+  isCorresponding Boolean @default(false)
+  
+  // 關聯
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  
+  @@map("submission_authors")
+}
+
+// 檔案資產表
+model FileAsset {
+  id           String        @id @default(cuid())
+  submissionId String
+  kind         FileAssetKind
+  version      Int           @default(1)
+  path         String
+  originalName String
+  size         Int
+  mimeType     String
+  checksum     String
+  
+  createdAt DateTime @default(now())
+  
+  // 關聯
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  
+  @@map("file_assets")
+}
+
+// 審稿指派表
+model ReviewAssignment {
+  id           String                    @id @default(cuid())
+  submissionId String
+  reviewerId   String
+  status       ReviewAssignmentStatus    @default(PENDING)
+  dueAt        DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // 關聯
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  reviewer   User       @relation(fields: [reviewerId], references: [id])
+  review     Review?
+  
+  @@unique([submissionId, reviewerId])
+  @@map("review_assignments")
+}
+
+// 審稿評論表
+model Review {
+  id               String            @id @default(cuid())
+  assignmentId     String            @unique
+  score            Int               @default(0) // 0-10分
+  commentToEditor  String?           @db.Text
+  commentToAuthor  String?           @db.Text
+  recommendation   ReviewRecommendation
+  
+  submittedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  // 關聯
+  assignment ReviewAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  
+  @@map("reviews")
+}
+
+// 決議表
+model Decision {
+  id           String          @id @default(cuid())
+  submissionId String
+  decidedBy    String
+  result       DecisionResult
+  note         String?         @db.Text
+  decidedAt    DateTime        @default(now())
+  
+  // 關聯
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  decider    User       @relation("DecisionCreatedBy", fields: [decidedBy], references: [id])
+  
+  @@map("decisions")
+}
+
+// 通知記錄表
+model NotificationLog {
+  id        String               @id @default(cuid())
+  type      NotificationType
+  to        String
+  payload   Json
+  sentAt    DateTime?
+  status    NotificationStatus   @default(PENDING)
+  errorMsg  String?
+  
+  createdAt DateTime @default(now())
+  
+  @@map("notification_logs")
+}
+
+// 審計記錄表
+model AuditLog {
+  id       String @id @default(cuid())
+  actorId  String
+  action   String
+  entity   String
+  entityId String
+  meta     Json?
+  
+  createdAt DateTime @default(now())
+  
+  // 關聯
+  actor User @relation("AuditLogActor", fields: [actorId], references: [id])
+  
+  @@map("audit_logs")
+}
+
+// 密碼重設令牌表
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  
+  createdAt DateTime @default(now())
+  
+  // 關聯
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("password_reset_tokens")
+}
+
+// 郵件驗證碼表
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  code      String    // 6位數字驗證碼
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int       @default(0) // 嘗試次數
+
+  createdAt DateTime @default(now())
+
+  // 關聯
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_verification_tokens")
+}
+
+// 枚舉定義
+enum RoleType {
+  AUTHOR
+  REVIEWER
+  EDITOR
+  CHIEF_EDITOR
+  ADMIN
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  REVISION_REQUIRED
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum FileAssetKind {
+  MANUSCRIPT
+  COVER_LETTER
+  FIGURE
+  SUPPLEMENTARY
+}
+
+enum ReviewAssignmentStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  SUBMITTED
+}
+
+enum ReviewRecommendation {
+  ACCEPT
+  MINOR_REVISION
+  MAJOR_REVISION
+  REJECT
+}
+
+enum DecisionResult {
+  ACCEPT
+  REVISE
+  REJECT
+}
+
+enum NotificationType {
+  VERIFY_EMAIL
+  PASSWORD_RESET
+  SUBMISSION_RECEIVED
+  ASSIGNMENT_INVITE
+  ASSIGNMENT_REMINDER
+  REVIEW_SUBMITTED
+  DECISION_NOTICE
+  REVISION_REQUEST
+  FINAL_ACCEPT
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  RETRY
+}

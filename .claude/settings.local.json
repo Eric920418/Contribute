@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(pnpm run:*)",
+      "Bash(pnpm db:push:*)",
+      "Bash(docker exec:*)",
+      "Bash(DATABASE_URL=\"postgresql://postgres:password@localhost:5432/conference_platform?schema=public\" pnpm db:push)",
+      "Bash(DATABASE_URL=\"postgresql://postgres:password@localhost:5432/conference_platform\" pnpm db:push)",
+      "Bash(docker logs:*)",
+      "Bash(docker restart:*)",
+      "Bash(pnpm dev:*)",
+      "Bash(make:*)",
+      "Bash(DATABASE_URL=\"postgresql://postgres@localhost:5432/conference_platform\" pnpm db:push)",
+      "Bash(curl:*)",
+      "mcp__Figma_MCP_PRO__get_figma_data",
+      "mcp__Figma_MCP_PRO__download_design_assets",
+      "mcp__Figma_MCP_PRO__check_reference",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm approve-builds:*)",
+      "Bash(pnpm db:generate:*)",
+      "Bash(POSTGRES_USER=postgres POSTGRES_PASSWORD=password DATABASE_URL=\"postgresql://postgres:password@localhost:5432/conference_platform\" pnpm db:push)",
+      "Bash(docker-compose:*)",
+      "Bash(pnpm husky:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(chmod:*)",
+      "mcp__Figma_MCP_PRO__show_frameworks",
+      "Bash(rm:*)",
+      "Bash(pnpm add:*)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(docker compose:*)",
+      "Bash(pnpm type-check:*)"
+    ],
+    "defaultMode": "acceptEdits"
+  }
+}

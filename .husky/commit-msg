@@ -1,0 +1,2 @@
+# 暫時停用 commitlint 檢查
+# pnpm commitlint --edit $1

@@ -1,0 +1,298 @@
+@import "tailwindcss";
+
+@theme {
+  /* 從 Figma 設計系統提取的顏色 */
+  --color-primary: #187df8; /* Pri 100 - 主色藍 */
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #335c7d; /* Sec 100 - 副色藍灰 */
+  --color-secondary-foreground: #ffffff;
+
+  /* 基礎顏色 */
+  --color-background: #ffffff; /* WT - 白色背景 */
+  --color-foreground: #00182c; /* BK 100 - 深藍黑文字 */
+  --color-muted: #eaedef; /* BG 100 - 淺灰背景 */
+  --color-muted-foreground: #00182c;
+
+  /* 狀態顏色 */
+  --color-destructive: #ff6231; /* Red light - 錯誤/警告 */
+  --color-destructive-foreground: #ffffff;
+  --color-success: #5bc900; /* Green light - 成功 */
+  --color-success-foreground: #ffffff;
+  --color-info: #529aff; /* Blue light - 資訊 */
+  --color-info-foreground: #ffffff;
+
+  /* 身份代表色 */
+  --color-author: #3b5fb9; /* 投稿作者 - 深藍色 */
+  --color-author-foreground: #ffffff;
+  --color-reviewer: #1fb6b8; /* 審稿人 - 青綠色 */
+  --color-reviewer-foreground: #ffffff;
+  --color-chief-editor: #a766e3; /* 主編 - 紫色 */
+  --color-chief-editor-foreground: #ffffff;
+  --color-editor: #4eb5e9; /* 編輯 - 天藍色 */
+  --color-editor-foreground: #ffffff;
+
+  /* UI 元件顏色 */
+  --color-border: #eaedef; /* BG 100 用於邊框 */
+  --color-input: #eaedef; /* BG 100 用於輸入框 */
+  --color-ring: #187df8; /* Pri 100 用於焦點環 */
+  --color-accent: #eaedef; /* BG 100 用於輔助色 */
+  --color-accent-foreground: #00182c;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #00182c;
+  --color-card: #ffffff;
+  --color-card-foreground: #00182c;
+
+  /* 從 Figma 設計系統提取的字體大小 - 基於 Noto Sans TC */
+  --font-family-sans: "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  
+  --text-64R: 64px;
+  --text-64R--line-height: 80px;
+  --text-64R--letter-spacing: 6%;
+  --text-64R--font-weight: 400;
+
+  --text-48M: 48px;
+  --text-48M--line-height: 56px;
+  --text-48M--letter-spacing: 4%;
+  --text-48M--font-weight: 500;
+
+  --text-48R: 48px;
+  --text-48R--line-height: 64px;
+  --text-48R--letter-spacing: 4%;
+  --text-48R--font-weight: 400;
+
+  --text-40M: 40px;
+  --text-40M--line-height: 48px;
+  --text-40M--letter-spacing: 4%;
+  --text-40M--font-weight: 500;
+
+  --text-40R: 40px;
+  --text-40R--line-height: 56px;
+  --text-40R--letter-spacing: 4%;
+  --text-40R--font-weight: 400;
+
+  --text-36M: 36px;
+  --text-36M--letter-spacing: 4%;
+  --text-36M--font-weight: 500;
+
+  --text-32R: 32px;
+  --text-32R--line-height: 42px;
+  --text-32R--letter-spacing: 4%;
+  --text-32R--font-weight: 400;
+
+  --text-28R: 28px;
+  --text-28R--line-height: 36px;
+  --text-28R--letter-spacing: 4%;
+  --text-28R--font-weight: 400;
+
+  --text-28M: 28px;
+  --text-28M--line-height: 36px;
+  --text-28M--letter-spacing: 4%;
+  --text-28M--font-weight: 500;
+
+  --text-24R: 24px;
+  --text-24R--line-height: 32px;
+  --text-24R--letter-spacing: 4%;
+  --text-24R--font-weight: 400;
+
+  --text-24M: 24px;
+  --text-24M--line-height: 32px;
+  --text-24M--letter-spacing: 4%;
+  --text-24M--font-weight: 500;
+
+  --text-20M: 20px;
+  --text-20M--line-height: 28px;
+  --text-20M--letter-spacing: 4%;
+  --text-20M--font-weight: 500;
+
+  --text-20R: 20px;
+  --text-20R--line-height: 28px;
+  --text-20R--letter-spacing: 4%;
+  --text-20R--font-weight: 400;
+
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    line-height: 1.5;
+  }
+
+  /* 移除全域無圓角設計規則，允許組件使用各自的圓角設計 */
+}
+
+
+
+   .academic-container {
+    @apply max-w-6xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  .academic-card {
+    @apply bg-card border border-border p-6 shadow-sm;
+  }
+
+  .academic-form {
+    @apply space-y-6;
+  }
+
+
+  /* 基於 Figma 設計系統的新樣式類別 */
+  .status-success {
+    @apply bg-success text-success-foreground;
+  }
+
+  .status-error {
+    @apply bg-destructive text-destructive-foreground;
+  }
+
+  .status-info {
+    @apply bg-info text-info-foreground;
+  }
+
+  .badge-primary {
+    @apply inline-flex items-center px-2.5 py-0.5 text-xs font-medium bg-primary text-primary-foreground;
+  }
+
+  .badge-secondary {
+    @apply inline-flex items-center px-2.5 py-0.5 text-xs font-medium bg-secondary text-secondary-foreground;
+  }
+
+  .alert-success {
+    @apply border-success bg-success/10 text-success-foreground p-4;
+  }
+
+  .alert-error {
+    @apply border-destructive bg-destructive/10 text-destructive-foreground p-4;
+  }
+
+  .alert-info {
+    @apply border-info bg-info/10 text-info-foreground p-4;
+  }
+
+  /* 身份代表色樣式類別 */
+  .role-author {
+    @apply bg-author text-author-foreground;
+  }
+
+  .role-reviewer {
+    @apply bg-reviewer text-reviewer-foreground;
+  }
+
+  .role-chief-editor {
+    @apply bg-chief-editor text-chief-editor-foreground;
+  }
+
+  .role-editor {
+    @apply bg-editor text-editor-foreground;
+  }
+
+  .badge-author {
+    @apply inline-flex items-center px-2.5 py-0.5 text-xs font-medium bg-author text-author-foreground;
+  }
+
+  .badge-reviewer {
+    @apply inline-flex items-center px-2.5 py-0.5 text-xs font-medium bg-reviewer text-reviewer-foreground;
+  }
+
+  .badge-chief-editor {
+    @apply inline-flex items-center px-2.5 py-0.5 text-xs font-medium bg-chief-editor text-chief-editor-foreground;
+  }
+
+  .badge-editor {
+    @apply inline-flex items-center px-2.5 py-0.5 text-xs font-medium bg-editor text-editor-foreground;
+  }
+
+
+  /* 基於 Figma 設計系統的文字樣式類別 */
+  .text-64R {
+    font-size: var(--text-64R);
+    line-height: var(--text-64R--line-height);
+    letter-spacing: var(--text-64R--letter-spacing);
+    font-weight: var(--text-64R--font-weight);
+  }
+
+  .text-48M {
+    font-size: var(--text-48M);
+    line-height: var(--text-48M--line-height);
+    letter-spacing: var(--text-48M--letter-spacing);
+    font-weight: var(--text-48M--font-weight);
+  }
+
+  .text-48R {
+    font-size: var(--text-48R);
+    line-height: var(--text-48R--line-height);
+    letter-spacing: var(--text-48R--letter-spacing);
+    font-weight: var(--text-48R--font-weight);
+  }
+
+  .text-40M {
+    font-size: var(--text-40M);
+    line-height: var(--text-40M--line-height);
+    letter-spacing: var(--text-40M--letter-spacing);
+    font-weight: var(--text-40M--font-weight);
+  }
+
+  .text-40R {
+    font-size: var(--text-40R);
+    line-height: var(--text-40R--line-height);
+    letter-spacing: var(--text-40R--letter-spacing);
+    font-weight: var(--text-40R--font-weight);
+  }
+
+  .text-36M {
+    font-size: var(--text-36M);
+    letter-spacing: var(--text-36M--letter-spacing);
+    font-weight: var(--text-36M--font-weight);
+  }
+
+  .text-32R {
+    font-size: var(--text-32R);
+    line-height: var(--text-32R--line-height);
+    letter-spacing: var(--text-32R--letter-spacing);
+    font-weight: var(--text-32R--font-weight);
+  }
+
+  .text-28R {
+    font-size: var(--text-28R);
+    line-height: var(--text-28R--line-height);
+    letter-spacing: var(--text-28R--letter-spacing);
+    font-weight: var(--text-28R--font-weight);
+  }
+
+  .text-28M {
+    font-size: var(--text-28M);
+    line-height: var(--text-28M--line-height);
+    letter-spacing: var(--text-28M--letter-spacing);
+    font-weight: var(--text-28M--font-weight);
+  }
+
+  .text-24R {
+    font-size: var(--text-24R);
+    line-height: var(--text-24R--line-height);
+    letter-spacing: var(--text-24R--letter-spacing);
+    font-weight: var(--text-24R--font-weight);
+  }
+
+  .text-24M {
+    font-size: var(--text-24M);
+    line-height: var(--text-24M--line-height);
+    letter-spacing: var(--text-24M--letter-spacing);
+    font-weight: var(--text-24M--font-weight);
+  }
+
+  .text-20M {
+    font-size: var(--text-20M);
+    line-height: var(--text-20M--line-height);
+    letter-spacing: var(--text-20M--letter-spacing);
+    font-weight: var(--text-20M--font-weight);
+  }
+
+  .text-20R {
+    font-size: var(--text-20R);
+    line-height: var(--text-20R--line-height);
+    letter-spacing: var(--text-20R--letter-spacing);
+    font-weight: var(--text-20R--font-weight);
+  }
+  

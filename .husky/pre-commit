@@ -1,0 +1,3 @@
+# Run basic checks
+pnpm lint
+pnpm type-check
