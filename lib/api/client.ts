@@ -29,8 +29,8 @@ apiClient.interceptors.response.use(
   (error) => {
     // 統一處理錯誤
     if (error.response?.status === 401) {
-      // 未授權，可能需要重新登入
-      if (typeof window !== 'undefined') {
+      // 只有在非登入頁面時才重定向
+      if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
         window.location.href = '/login'
       }
     }

@@ -18,7 +18,11 @@ model User {
   emailVerifiedAt DateTime?
   displayName     String
   orcid           String?
+  affiliation     String?    // 服務單位  
+  position        String?    // 職稱
+  expertise       String[]   // 專業知識領域
   mustChangePassword Boolean @default(false) // 是否需要強制改密碼
+  status          UserStatus @default(NOT_SENT) // 用戶狀態
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -331,4 +335,10 @@ enum NotificationStatus {
   SENT
   FAILED
   RETRY
+}
+
+enum UserStatus {
+  NOT_SENT        // 尚未寄送
+  PENDING_ACTIVATION // 待啟用
+  ENABLED         // 已啟用
 }

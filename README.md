@@ -1,331 +1,198 @@
-# 科技學術研討會平台
+# 科技學術研討會管理平台
 
-專為學術研討會設計的完整管理平台，支援投稿、審稿、編輯等工作流程
+> 專為學術研討會設計的現代化投稿審查管理系統，支援多角色工作流程、智慧審稿分配、及完整的稿件生命週期管理
 
-## 📝 最新更新
+[![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue?logo=postgresql)](https://postgresql.org/)
+[![Docker](https://img.shields.io/badge/Docker-ready-blue?logo=docker)](https://docker.com/)
 
-### 2025-08-20
+## 📖 系統簡介
 
-#### 編輯工作台真實資料整合
-- **完全移除模擬數據**: 編輯頁面不再使用 mockAssignments，改為真實 API 串接
-  - **建立編輯專用 API**: 新增 `/api/editor/submissions` 端點，支援編輯查看所有投稿
-  - **權限控制**: 嚴格限制只有 EDITOR 和 CHIEF_EDITOR 角色可以存取
-  - **資料轉換**: 將資料庫格式轉換為前端期望的 EditorAssignment 格式
-  - **狀態映射**: 完整對應資料庫狀態（SUBMITTED, UNDER_REVIEW 等）到前端顯示狀態
-  - **優先級計算**: 基於投稿時間和狀態自動計算稿件處理優先級
-- **編輯操作功能 API**: 建立完整的編輯工作流程 API
-  - **審稿人分配**: `/api/editor/submissions/[id]/assign-reviewer` - 支援多審稿人分配和截止日期設定
-  - **編輯決議**: `/api/editor/submissions/[id]/decision` - 接受/修改/拒絕決議功能
-  - **審稿人列表**: `/api/editor/reviewers` - 取得可用審稿人及其工作負荷統計
-  - **投稿詳情**: `/api/editor/submissions/[id]` - 完整投稿資訊查看
-- **真實統計數據**: 統計圖表和數字都直接從資料庫計算
-  - **動態總數**: 稿件總數即時反映資料庫狀態
-  - **狀態統計**: 新投稿、審稿中、需修改、已接受、已拒絕等數量統計
-  - **篩選功能**: 支援按狀態篩選，API 端點直接回傳過濾後數據
-- **操作功能增強**: 
-  - **查看稿件**: 支援跳轉到投稿詳情頁面
-  - **下載功能**: 整合檔案下載 API（開發中）
-  - **分配審稿人**: 模態視窗或專頁（規劃中）
-  - **編輯決議**: 決議模態視窗（規劃中）
+**科技學術研討會管理平台** 是一套專為學術機構打造的完整投稿審查管理解決方案。系統整合了投稿者、審稿人、編輯及主編的完整工作流程，提供從投稿提交到最終發表的全方位管理功能。
 
-#### 作者頁面步驟狀態bug修復
-- **修復新建稿件顯示錯誤步驟問題**: 解決每次進入頁面時左邊選單步驟顯示之前編輯記錄的問題
-  - **根本原因**: `loadDraft()` 函數會自動載入 localStorage 中的步驟狀態（第88行），不區分新建或編輯模式
-  - **完整修復方案**: 
-    - 移除 `loadDraft()` 函數中的自動步驟載入邏輯，確保新建稿件從步驟1開始
-    - 保留 `loadDraftForEdit()` 函數中的步驟載入功能，確保編輯稿件時正確顯示之前的步驟
-    - **新增編輯模式追蹤**: 新增 `isEditingDraft` 狀態，區分新建與編輯模式
-    - **條件式步驟顯示**: 步驟區塊只在編輯模式（`isEditingDraft = true`）時顯示
-    - **狀態管理**: 在 `startNewSubmission()` 重置編輯模式，在 `loadDraftForEdit()` 設置編輯模式
-  - **使用者體驗改善**: 
-    - ✅ 頁面初始：隱藏步驟選單，提供乾淨的主頁介面
-    - ✅ 新建稿件：點擊「提交新稿件」後顯示步驟選單，從步驟1開始
-    - ✅ 編輯稿件：顯示步驟選單並正確載入之前保存的步驟狀態
-    - ✅ 場景區分：根據使用者操作動態顯示/隱藏步驟區塊
-    - ✅ 視覺邏輯：只在進入投稿表單時才顯示步驟導航
-    - ✅ 動畫效果：步驟區塊出現時具備平滑的滑入動畫，各步驟依序漸進顯示
-
-### 2025-08-19
-
-#### 投稿系統草稿保存功能重大修復
-- **修復草稿保存不完整問題**: 解決關鍵詞、論文類型、檔案、作者資訊等欄位未正確保存的關鍵問題
-  - **根本原因**: 
-    1. localStorage 保存邏輯不完整，只保存部分欄位（title、abstract、track）
-    2. API 接口定義缺失，`SubmissionData` 缺少新欄位
-    3. 資料庫 Schema 缺少對應欄位
-    4. 後端 API 未處理新欄位
-    5. 草稿保存邏輯錯誤，每次都創建新草稿而不是更新現有的
-  - **完整修復內容**:
-    - **前端修復**: 重構 `saveDraft` 和 `loadDraft` 函數，完整保存所有表單欄位
-    - **API 接口擴充**: 新增 `paperType`、`keywords`、`fileInfo`、`agreements` 欄位到 `SubmissionData`
-    - **資料庫 Schema 更新**: 新增 `paperType`、`keywords`、`agreementOriginalWork`、`agreementNoConflictOfInterest`、`agreementConsentToPublish` 欄位到 Submission 表
-    - **後端 API 增強**: 更新 POST 和 PUT endpoints 處理新增欄位
-    - **草稿更新邏輯**: 修復 `saveDraft` API，支援更新現有草稿而不是重複創建
-    - **智能草稿檢測**: 優先使用 localStorage 保存的 `draftId` 匹配現有草稿
-  - **檔案處理改進**: 針對無法序列化的 File 物件，改為保存檔案資訊（name、size、type）
-  - **使用者體驗**: 新增檔案提示功能，載入草稿時提醒使用者重新上傳檔案
-  - **自動載入**: 頁面載入時自動載入之前保存的草稿，提升工作流程連續性
-  - **完整保存欄位**:
-    - ✅ `paperType` - 論文類型（新增資料庫欄位）
-    - ✅ `conferenceSubject` - 會議子題  
-    - ✅ `title` - 標題
-    - ✅ `abstract` - 摘要
-    - ✅ `keywords` - 關鍵詞（新增資料庫欄位）
-    - ✅ `fileInfo` - 檔案資訊（前端保存）
-    - ✅ `authors` - 完整作者陣列
-    - ✅ `agreements` - 作者聲明（新增三個資料庫欄位）
-    - ✅ `currentStep` - 當前步驟
-    - ✅ `draftId` - 草稿ID（用於更新現有草稿）
-
-### 2025-01-19
-
-#### 投稿系統重大修復與功能增強
-- **修復草稿提交bug**: 解決提交後草稿列表未消失的關鍵問題
-  - **根本原因**: API 邏輯錯誤，`submitSubmission` 創建新投稿而非更新現有草稿
-  - **修復內容**: 重構 API 邏輯，正確更新草稿狀態為 SUBMITTED
-  - **流水號系統**: 新增自動流水號產生功能 (格式: SUB + 年月日時分秒 + 隨機三位數)
-  - **電子郵件通知**: 提交成功後自動通知所有作者，包含流水號資訊
-  - **資料庫增強**: 新增 `serialNumber` 和 `submittedAt` 欄位到 Submission 模型
-  - **前端整合**: 修改提交邏輯，能正確找到對應草稿並更新狀態
-
-- **草稿修訂功能**: 將靜態顯示改為互動式功能
-  - **按鈕化改進**: 草稿修訂區塊改為可點擊按鈕，支援滑鼠懸停效果
-  - **修訂列表頁面**: 新增專門的修訂列表視圖，包含編號、標題、日期、操作功能
-  - **完整操作**: 支援修訂、查看兩大功能，使用現有 API 架構
-  - **導航支援**: 整合 breadcrumb 導航，支援返回投稿列表
-
-- **API 架構優化**: 
-  - 新增 `/api/submissions/[id]/submit` 專用提交端點
-  - 整合電子郵件通知服務架構
-  - 支援失敗回滾機制和完整錯誤處理
-- **修復編輯者身份資料顯示**: 修復編輯者dashboard顯示假資料的問題 (檔案: `app/editor/dashboard/page.tsx:211-213, 339-348`)
-  - 移除硬編碼的假使用者資料 `{displayName: '張三'}`
-  - 整合真實的 API 調用 `/auth/me`，從資料庫撈取使用者資料
-  - 修正身份標識動態顯示：根據用戶角色顯示「編輯」、「主編」、「審稿人」、「投稿作者」或「用戶」
-  - 修正錯誤的標題顯示從「投稿作者」改為正確的角色身份
-  - 現在顯示的 `user?.displayName` 和角色資訊都是來自 PostgreSQL 資料庫的真實資料
-  - 整合完整的錯誤處理，包含詳細的錯誤訊息顯示
-
-- **修復審稿者身份資料顯示**: 修復審稿者dashboard顯示假資料的問題 (檔案: `app/reviewer/dashboard/page.tsx:245-250`)
-  - 移除硬編碼的假使用者資料 `{displayName: '張三'}`
-  - 整合 `useAuth` hook，從真實資料庫撈取使用者資料
-  - 修正身份標識從「投稿作者」改為「審稿者」
-  - 加入認證狀態檢查，確保載入前完成使用者驗證
-  - 現在顯示的 `user?.displayName` 是來自 PostgreSQL 資料庫的真實資料
-
-- **修復投稿表單bug**: 修復「提交新稿件」按鈕錯誤載入草稿的問題
-  - 移除錯誤的 `loadDraft()` 調用 (檔案: `app/author/page.tsx:1510`)
-  - 新增 `startNewSubmission()` 函數，正確處理新投稿流程
-  - 當開始新投稿時，如果當前有內容會自動保存為草稿
-  - 清空表單並重置所有狀態到初始值
-  - 確保每次點擊都開始全新投稿，避免載入舊草稿
+### 🎯 核心價值
+- **提升審稿效率** - 智慧審稿人分配與工作負荷管理
+- **優化投稿體驗** - 6步驟直觀投稿流程，支援草稿保存
+- **強化品質控制** - 雙盲同儕審查與多層決議機制
+- **數據驅動決策** - 即時統計分析與進度追蹤
 
 ## ✨ 核心功能
 
-- **完整認證系統**: 註冊/登入/Email驗證/密碼管理
-- **多角色權限**: 投稿者、審稿人、編輯、主編四重權限
-- **投稿管理**: 支援多作者、版本控制、狀態追蹤
-- **作者工作台**: 全新的選單式內容切換界面，支援首頁概覽、投稿列表、投稿歷史、已完成投稿四大功能模塊，**完全整合真實資料系統**
-- **整合式多步驟提交**: 6步驟投稿流程直接整合在作者工作台右側內容區，包含類型選擇、標題摘要、檔案上傳、作者資訊、聲明確認、最終檢查，支援即時驗證與錯誤處理，無需跳轉頁面。**真實 API 整合**：草稿保存、投稿提交直接連接後端資料庫；**動態統計**：首頁統計數據即時從資料庫讀取；**狀態追蹤**：投稿狀態完整反映在各個模塊中
-- **草稿管理系統**: 完整的草稿操作功能，包含編輯（載入草稿到表單並切換編輯模式）、查看（詳細內容模態框展示基本資訊、摘要、作者、檔案）、刪除（二次確認 + API 呼叫 + 列表更新）三大功能，整合現有 API 架構，支援完整錯誤處理
-- **審稿工作台**: 審稿者專屬dashboard，顯示審稿任務清單、統計數據、截止日期管理，**完全整合真實使用者資料系統**，從 PostgreSQL 資料庫讀取使用者身份資訊
-- **同儕審查**: 匿名雙盲審查、評分管理
-- **主編工作台**: 全新設計的稿件管理界面，包含統計圖表、表格化列表、狀態追蹤、分頁功能
-- **檔案系統**: S3相容儲存、安全存取
-- **通知系統**: SMTP郵件、事件驅動
-- **年度管理**: 多年度支援、數據統計
+### 👤 多角色管理系統
+| 角色 | 核心功能 | 權限範圍 |
+|------|----------|----------|
+| **投稿者** | 稿件提交、草稿管理、修訂回覆 | 個人投稿管理 |
+| **審稿人** | 同儕審查、評分建議、專業評論 | 指派稿件審查 |
+| **編輯** | 審稿人分配、流程管理、初步決議 | 編輯範圍稿件 |
+| **主編** | 最終決議、期刊策略、團隊管理 | 全系統管理 |
+
+### 🚀 智慧投稿管理
+- **6步驟投稿流程** - 類型選擇 → 內容填寫 → 檔案上傳 → 作者資訊 → 聲明確認 → 最終檢查
+- **草稿自動保存** - 即時保存進度，支援跨裝置續寫
+- **多作者協作** - 支援通訊作者指定與作者資訊管理
+- **版本控制** - 完整的修訂歷程追蹤
+
+### 🔍 進階審稿系統
+- **智慧分配機制** - 基於專業領域與工作負荷的最佳分配
+- **雙盲審查** - 保護投稿者與審稿人隱私
+- **評分標準化** - 10分制評分系統，支援詳細評論
+- **截止日期管理** - 自動提醒與進度追蹤
+
+### 📊 數據分析儀表板
+- **即時統計** - 投稿數量、審稿進度、決議分析
+- **工作負荷監控** - 審稿人工作量可視化
+- **效率指標** - 平均審稿時間、決議週期分析
 
 ## 🏗️ 技術架構
 
-- **前端**: Next.js 15 + TypeScript + Tailwind CSS
-- **資料庫**: PostgreSQL + Prisma ORM  
-- **認證**: JWT + HttpOnly Cookie
-- **檔案儲存**: MinIO (S3相容)
-- **郵件**: SMTP + 模板系統
-- **容器化**: Docker + Docker Compose
-
-## 🎨 設計系統
-
-基於 Figma 設計的完整視覺系統，使用 **Noto Sans TC** 字體。作者工作台採用選單式切換設計，提供直觀的內容管理體驗；主編工作台採用全新的表格式稿件管理界面，包含統計圖表和詳細的稿件追蹤功能：
-
-#### 主要顏色
-- **Primary**: `#187DF8` - 主要操作按鈕
-- **Secondary**: `#335C7D` - 次要操作
-- **Success**: `#5BC900` - 成功狀態
-- **Error**: `#FF6231` - 錯誤狀態
-
-#### 身份代表色
-- **Author**: `#3B5FB9` - 投稿作者
-- **Reviewer**: `#1FB6B8` - 審稿人  
-- **Chief Editor**: `#A855F7` - 主編（紫色主題）
-- **Editor**: `#4EB5E9` - 編輯
-
-## 📁 專案結構
-
+### 💻 現代化技術棧
 ```
-├── app/                 # Next.js 頁面
-├── components/          # React 組件
-├── lib/                # 工具函數
-├── prisma/             # 資料庫 Schema
-├── public/             # 靜態資源
-├── docker-compose.yml  # 容器配置
-└── Makefile           # 常用命令
+前端框架    Next.js 15 + TypeScript + Tailwind CSS
+資料庫     PostgreSQL 15 + Prisma ORM
+認證系統    JWT + HttpOnly Cookie + 角色權限控制
+檔案存儲    MinIO (AWS S3 相容)
+郵件服務    SMTP + 模板引擎
+容器化     Docker + Docker Compose
+快取系統    Redis
+代理服務    Nginx
 ```
+
+### 🎨 設計系統
+基於 **Figma** 設計，採用 **Noto Sans TC** 字體的現代化學術風格：
+
+| 元素 | 設計規範 | 應用場景 |
+|------|----------|----------|
+| 主色調 `#187DF8` | 現代科技藍 | 主要操作按鈕、連結 |
+| 成功色 `#5BC900` | 生機綠 | 成功狀態、完成標示 |
+| 警告色 `#FF6231` | 活力橙 | 錯誤提示、重要通知 |
+| 角色識別色 | 紫色/藍綠/藍色系 | 主編/審稿人/作者身份 |
 
 ## 🚀 快速開始
 
-### 環境要求
-- Node.js >= 18.17.0
-- pnpm >= 8.0.0  
-- Docker & Docker Compose
+### 📋 環境需求
+- **Node.js** >= 18.17.0
+- **pnpm** >= 8.0.0
+- **Docker** & Docker Compose
 
-### 安裝步驟
+### ⚡ 一鍵啟動
 
-1. **安裝依賴**
-   ```bash
-   pnpm install
-   ```
+```bash
+# 1. 複製專案並安裝依賴
+git clone <repository-url>
+cd conference-platform
+pnpm install
 
-2. **設定環境變數**
-   ```bash
-   cp .env.example .env.local
-   ```
+# 2. 啟動開發環境（包含所有服務）
+make dev
+pnpm dev
 
-3. **啟動開發環境**
-   ```bash
-   make dev          # 啟動基礎服務
-   pnpm dev          # 啟動應用 (port 3000)
-   ```
+# 3. 初始化資料庫
+pnpm db:generate && pnpm db:push && pnpm db:seed
+```
 
-4. **初始化資料庫**
-   ```bash
-   pnpm db:generate
-   pnpm db:push
-   pnpm db:seed
-   ```
+### 🌐 服務訪問
 
-### 訪問應用
-- **主應用**: http://localhost:3000
-- **MailHog**: http://localhost:8025
+| 服務 | 地址 | 用途 |
+|------|------|------|
+| **主應用** | http://localhost:3000 | 學術研討會管理系統 |
+| **郵件測試** | http://localhost:8025 | MailHog 郵件預覽 |
+| **MinIO 控制台** | http://localhost:9001 | 檔案儲存管理 |
+| **資料庫** | localhost:5433 | PostgreSQL 連線 |
+
+### 👥 測試帳號
+
+| 角色 | 帳號 | 密碼 | 功能範圍 |
+|------|------|------|----------|
+| **主編** | chief@conference.example.com | chief123456 | 系統完整管理權限 |
+| **編輯** | editor@conference.example.com | editor123456 | 稿件編輯審查權限 |
+| **審稿人** | reviewer@conference.example.com | reviewer123456 | 稿件審查評分權限 |
 
 ## 🔧 開發指南
 
-### 常用命令
+### ⚙️ 常用指令
+
 ```bash
-make dev         # 啟動開發環境
-make down        # 停止服務
-pnpm dev         # 啟動應用
-pnpm db:push     # 同步資料庫
-pnpm type-check  # 類型檢查
+# 環境管理
+make dev          # 啟動開發環境（基礎服務）
+make up           # 啟動完整環境
+make down         # 停止所有服務
+make clean        # 清理容器和資料
+
+# 開發工具
+pnpm dev          # 啟動 Next.js 應用
+pnpm type-check   # TypeScript 類型檢查
+pnpm lint         # ESLint 代碼檢查
+
+# 資料庫操作
+pnpm db:generate  # 生成 Prisma Client
+pnpm db:push      # 同步資料庫 Schema
+pnpm db:seed      # 填充測試資料
 ```
 
-### 預設帳號
-- **主編**: chief@conference.example.com / chief123456
-- **編輯**: editor@conference.example.com / editor123456
-- **審稿人**: reviewer@conference.example.com / reviewer123456
+### 📊 系統架構
 
-## 📊 資料庫設計
-
-### 核心模型
-- **User**: 使用者基本資料與角色
-- **Conference**: 研討會配置與年度管理
-- **Submission**: 投稿資料與狀態追蹤，整合真實資料 API 系統
-- **Review**: 審稿評論與評分系統
-- **FileAsset**: 檔案資產管理
-- **NotificationLog**: 郵件通知記錄
-
-### 投稿系統功能
-- **真實資料整合**: 完全取代假資料，使用 Prisma + PostgreSQL
-- **API 完整性**: GET/POST/PUT/DELETE 完整 CRUD 操作
-- **狀態管理**: 草稿、已提交、審稿中、需修訂、已接受、已拒絕、已撤回
-- **草稿管理**: 編輯（一鍵載入到表單）、查看（模態框詳細展示）、刪除（安全確認機制），完整整合現有 hooks 架構
-- **統計分析**: 即時統計各狀態投稿數量
-- **資料驗證**: 前後端完整驗證機制
-
-### 權限系統
-| 功能 | 投稿者 | 審稿人 | 編輯 | 主編 |
-|------|-------|-------|------|------|
-| 建立投稿 | ✅ | ❌ | ❌ | ❌ |
-| 審稿工作 | ❌ | ✅ | ✅ | ✅ |
-| 指派審稿人 | ❌ | ❌ | ✅ | ✅ |
-| 最終決議 | ❌ | ❌ | ❌ | ✅ |
-
-## 🔐 安全特性
-
-- **密碼安全**: Argon2 加密
-- **認證**: JWT + HttpOnly Cookie，自動過期管理
-- **路由保護**: Next.js Middleware + 客戶端雙重保護
-- **權限控制**: 基於角色的存取控制，頁面級權限驗證
-- **會話管理**: 安全的 Cookie 設定，自動重定向處理
-- **檔案安全**: 類型限制與掃描
-- **審計記錄**: 完整操作日誌
-
-## 🔒 認證流程
-
-### 登錄機制
-1. **安全驗證**: 使用者輸入帳密後進行後端驗證
-2. **Session 創建**: 成功後建立 JWT session，設定 HttpOnly Cookie
-3. **角色檢查**: 根據選擇的身份（投稿者/審稿人/編輯）驗證權限
-4. **自動跳轉**: 依據角色自動導向對應的專屬頁面
-
-### 路由保護
-- **中間件保護**: 在服務端攔截未授權訪問
-- **客戶端保護**: 使用 `ProtectedRoute` 組件包裝受保護頁面
-- **認證Hook**: `useAuth` Hook 統一管理認證狀態
-- **自動重定向**: 未登錄自動導回登錄頁，已登錄跳過登錄頁
-
-### 權限驗證
-- **AUTHOR**: 只能訪問 `/author` 路徑，具備選單式內容切換功能，包含首頁概覽、投稿列表、投稿歷史、已完成投稿四大模塊，以及整合式6步驟多步驟投稿表單系統，無需跳轉頁面即可完成投稿。**真實資料整合**：所有功能模塊都直接從 PostgreSQL 資料庫讀取資料，統計數據、投稿列表、歷史記錄都是即時更新的真實資料，完全告別假資料時代
-- **REVIEWER**: 只能訪問 `/reviewer` 路徑，具備專屬審稿工作台，顯示審稿任務列表、統計數據、截止日期追蹤，**真實使用者資料整合**：所有使用者身份資訊都直接從 PostgreSQL 資料庫讀取，包含 displayName 等個人資訊
-- **EDITOR/CHIEF_EDITOR**: 只能訪問 `/editor` 路徑，主編擁有完整的稿件管理界面，包含統計數據和表格化管理功能
-- **ADMIN**: 能訪問 `/admin` 路徑
-
-## 📧 郵件系統
-
-### 功能特色
-- **Email驗證**: 6位數驗證碼，10分鐘過期
-- **密碼重設**: 24小時安全連結
-- **防濫用機制**: 頻率限制與嘗試保護
-- **模板系統**: HTML + 文字版本
-
-### 開發環境
-- **MailHog**: http://localhost:8025 - 測試郵件查看
-- **SMTP測試**: localhost:1025
-
-### 生產配置
-```bash
-# .env.local
-SMTP_HOST="your-smtp-server.com"
-SMTP_PORT=587
-SMTP_USER="your-email@domain.com"
-SMTP_PASS="your-password"
+```mermaid
+graph TD
+    A[用戶瀏覽器] --> B[Nginx 反向代理]
+    B --> C[Next.js 應用]
+    C --> D[PostgreSQL 資料庫]
+    C --> E[MinIO 文件存儲]
+    C --> F[Redis 快取]
+    C --> G[SMTP 郵件服務]
 ```
 
-## 🚢 部署指南
+## 🛡️ 安全與合規
 
-### 生產環境
-```bash
-cp .env.example .env.production
-docker-compose up -d
-docker exec -it conference_web pnpm db:push
-```
+### 🔐 安全機制
+- **密碼加密**: Bcrypt 雜湊演算法
+- **Session 管理**: JWT + HttpOnly Cookie
+- **權限控制**: 基於角色的訪問控制 (RBAC)
+- **資料驗證**: Zod Schema 前後端驗證
+- **檔案安全**: MIME 類型檢查與大小限制
 
-### 監控維護
-- **健康檢查**: GET /api/health
-- **日誌**: Docker logs
-- **備份**: 定期資料庫備份
+### 🎯 SEO 與 AI 搜尋最佳化
 
-## 🤝 貢獻指南
+本系統採用**先進的 AI SEO 策略**，專為現代搜尋引擎與 AI 助手優化：
 
-1. Fork 專案並建立功能分支
-2. 遵循 ESLint + Prettier 規範
-3. 確保測試通過
-4. 提交詳細的 Pull Request
+#### 📈 結構化標記支援
+- **Schema.org 標記**: Organization, Product, FAQs, Reviews
+- **Open Graph**: Facebook, LinkedIn 社群分享優化  
+- **Twitter Cards**: Twitter 分享卡片支援
+- **JSON-LD**: 結構化資料標記，提升 AI 理解度
 
-## 📄 授權
+#### 🤖 AI 搜尋引擎優化
+- **ChatGPT 友好**: 清晰的標題結構與內容組織
+- **Google Gemini 支援**: 語意化 HTML 與內容標記
+- **Perplexity 最佳化**: 問答式內容結構
+- **RSS Feed**: 自動生成內容摘要供 AI 爬蟲使用
 
-MIT License - 詳見 [LICENSE](LICENSE) 檔案
+#### 🌐 多語系支援
+- **中英雙語**: 完整的中英文內容支援
+- **語意優化**: 針對不同語言的搜尋習慣優化
+- **文化適應**: 符合學術領域的專業用語規範
+
+## 📞 支援與聯絡
+
+### 🆘 技術支援
+- **文件**: [完整開發文件](docs/)
+- **API 參考**: [API 接口說明](docs/api.md)
+- **問題回報**: [GitHub Issues](https://github.com/your-org/conference-platform/issues)
+
+### 👥 社群與貢獻
+- **貢獻指南**: [CONTRIBUTING.md](CONTRIBUTING.md)
+- **程式碼規範**: ESLint + Prettier
+- **授權**: MIT License
 
 ---
 
+<div align="center">
+
+**科技學術研討會管理平台** • 讓學術交流更簡單高效
+
 © 2024 國立臺北教育大學課程與教學傳播科技研究所
+
+[![GitHub](https://img.shields.io/badge/GitHub-000000?logo=github)](https://github.com/your-org/conference-platform)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+</div>

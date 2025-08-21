@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { Eye, EyeOff } from 'lucide-react'
 import Header from '@/components/layout/Header'
 import Footer from '@/components/layout/Footer'
 
@@ -13,6 +14,10 @@ export default function ResetPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isValidToken, setIsValidToken] = useState<boolean | null>(null)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
 
   useEffect(() => {
     const tokenParam = searchParams.get('token')
@@ -26,14 +31,16 @@ export default function ResetPasswordPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setError('')
+    setSuccess('')
     
     if (password !== confirmPassword) {
-      alert('密碼不一致')
+      setError('密碼不一致')
       return
     }
 
     if (password.length < 8) {
-      alert('密碼至少需要8個字元')
+      setError('密碼至少需要8個字元')
       return
     }
 
@@ -55,15 +62,28 @@ export default function ResetPasswordPage() {
       const data = await response.json()
 
       if (response.ok) {
-        alert(data.message || '密碼重設成功！')
-        router.push('/login')
+        setSuccess(data.message || '密碼重設成功！')
+        
+        // 根據用戶角色導向對應頁面
+        setTimeout(() => {
+          const roles = data.user?.roles || []
+          if (roles.includes('EDITOR') || roles.includes('CHIEF_EDITOR')) {
+            router.push('/editor/dashboard')
+          } else if (roles.includes('REVIEWER')) {
+            router.push('/reviewer/dashboard')
+          } else if (roles.includes('AUTHOR')) {
+            router.push('/author')
+          } else {
+            router.push('/login')
+          }
+        }, 2000)
       } else {
         console.error('密碼重設失敗:', data)
-        alert(data.error || '重設失敗，請稍後再試')
+        setError(data.error || '重設失敗，請稍後再試')
       }
     } catch (error) {
       console.error('密碼重設請求錯誤:', error)
-      alert('網路錯誤，請稍後再試')
+      setError('網路錯誤，請稍後再試')
     } finally {
       setIsSubmitting(false)
     }
@@ -135,16 +155,39 @@ export default function ResetPasswordPage() {
               重設密碼
             </h1>
 
+            {error && (
+              <div className="mb-14 p-6 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-red-600 text-[24px] font-medium">{error}</p>
+              </div>
+            )}
+
+            {success && (
+              <div className="mb-14 p-6 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-green-600 text-[24px] font-medium">{success}</p>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-14">
-              <div>
+              <div className="relative">
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   placeholder="新密碼"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full h-[122px] px-8 text-[40px] border-2 border-foreground/20 rounded-lg focus:border-primary focus:ring-0"
+                  onChange={e => setPassword(e.target.value)}
+                  className="w-full h-[122px] px-8 pr-[120px] text-[40px] border-2 border-foreground/20 rounded-lg focus:border-primary focus:ring-0"
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-8 top-1/2 transform -translate-y-1/2 text-foreground/40 hover:text-foreground/60"
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-[56px] h-[56px]" />
+                  ) : (
+                    <Eye className="w-[56px] h-[56px]" />
+                  )}
+                </button>
                 {password && !validatePassword(password) && (
                   <p className="mt-4 text-red-500 text-[20px]">
                     密碼必須至少8個字元，包含大小寫字母和數字
@@ -152,19 +195,28 @@ export default function ResetPasswordPage() {
                 )}
               </div>
 
-              <div>
+              <div className="relative">
                 <input
-                  type="password"
+                  type={showConfirmPassword ? 'text' : 'password'}
                   placeholder="確認新密碼"
                   value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full h-[122px] px-8 text-[40px] border-2 border-foreground/20 rounded-lg focus:border-primary focus:ring-0"
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  className="w-full h-[122px] px-8 pr-[120px] text-[40px] border-2 border-foreground/20 rounded-lg focus:border-primary focus:ring-0"
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-8 top-1/2 transform -translate-y-1/2 text-foreground/40 hover:text-foreground/60"
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff className="w-[56px] h-[56px]" />
+                  ) : (
+                    <Eye className="w-[56px] h-[56px]" />
+                  )}
+                </button>
                 {confirmPassword && password !== confirmPassword && (
-                  <p className="mt-4 text-red-500 text-[20px]">
-                    密碼不一致
-                  </p>
+                  <p className="mt-4 text-red-500 text-[20px]">密碼不一致</p>
                 )}
               </div>
 
@@ -172,7 +224,7 @@ export default function ResetPasswordPage() {
                 <button
                   type="submit"
                   disabled={!isValidForm || isSubmitting}
-                  className="w-full h-[122px] text-[40px] font-medium leading-[58px]"
+                  className="w-full h-[122px] text-[40px] font-medium leading-[58px] bg-primary text-white rounded-lg"
                 >
                   {isSubmitting ? '重設中...' : '確認重設'}
                 </button>

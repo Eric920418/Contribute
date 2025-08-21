@@ -42,14 +42,15 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    // 更新密碼並取消強制改密碼標記
+    // 更新密碼並取消強制改密碼標記，同時啟用帳號
     const hashedPassword = await hashPassword(validatedData.newPassword)
     
     await prisma.user.update({
       where: { id: authResult.user!.id },
       data: { 
         passwordHash: hashedPassword,
-        mustChangePassword: false
+        mustChangePassword: false,
+        status: 'ENABLED' // 密碼更改後自動啟用帳號
       }
     })
     

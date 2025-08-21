@@ -16,18 +16,28 @@ export default function ForgotPasswordPage() {
     setIsSubmitting(true)
     
     try {
-      // TODO: 實現忘記密碼邏輯
-      console.log('Reset password for:', email)
+      console.log('發送密碼重設請求到:', email)
       
-      // 模擬 API 請求
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      const response = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email: email.trim() }),
+      })
       
-      // 這裡可以顯示成功訊息或跳轉到成功頁面
-      alert('密碼重設信已寄送到您的電子郵件')
+      const data = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(data.error || '發送失敗')
+      }
+      
+      // 顯示成功訊息
+      alert(data.message || '密碼重設信已寄送到您的電子郵件')
       
     } catch (error) {
-      console.error('Failed to send reset email:', error)
-      alert('發送失敗，請稍後再試')
+      console.error('發送密碼重設郵件失敗:', error)
+      alert(error instanceof Error ? error.message : '發送失敗，請稍後再試')
     } finally {
       setIsSubmitting(false)
     }

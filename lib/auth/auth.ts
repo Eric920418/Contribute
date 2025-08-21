@@ -120,7 +120,7 @@ export async function authenticateUser(credentials: LoginCredentials): Promise<A
     if (!user) {
       return {
         success: false,
-        error: 'Email 或密碼錯誤'
+        error: '此 Email 尚未註冊，請先註冊帳戶'
       }
     }
 
@@ -128,7 +128,7 @@ export async function authenticateUser(credentials: LoginCredentials): Promise<A
     if (!isPasswordValid) {
       return {
         success: false,
-        error: 'Email 或密碼錯誤'
+        error: '密碼錯誤，請檢查您的密碼'
       }
     }
 
@@ -188,7 +188,7 @@ export async function createPasswordResetToken(email: string): Promise<string | 
   }
 }
 
-export async function resetPassword(token: string, newPassword: string): Promise<boolean> {
+export async function resetPassword(token: string, newPassword: string): Promise<{ success: boolean; user?: any }> {
   try {
     const resetTokens = await prisma.passwordResetToken.findMany({
       where: {
@@ -196,7 +196,15 @@ export async function resetPassword(token: string, newPassword: string): Promise
         usedAt: null
       },
       include: {
-        user: true
+        user: {
+          include: {
+            roles: {
+              include: {
+                role: true
+              }
+            }
+          }
+        }
       }
     })
 
@@ -210,14 +218,18 @@ export async function resetPassword(token: string, newPassword: string): Promise
     }
 
     if (!validToken) {
-      return false
+      return { success: false }
     }
 
-    // 更新密碼
+    // 更新密碼並啟用帳號
     const hashedPassword = await hashPassword(newPassword)
     await prisma.user.update({
       where: { id: validToken.userId },
-      data: { passwordHash: hashedPassword }
+      data: { 
+        passwordHash: hashedPassword,
+        mustChangePassword: false,
+        status: 'ENABLED' // 密碼重設後自動啟用帳號
+      }
     })
 
     // 標記令牌為已使用
@@ -226,10 +238,19 @@ export async function resetPassword(token: string, newPassword: string): Promise
       data: { usedAt: new Date() }
     })
 
-    return true
+    return {
+      success: true,
+      user: {
+        id: validToken.user.id,
+        email: validToken.user.email,
+        displayName: validToken.user.displayName,
+        emailVerified: !!validToken.user.emailVerifiedAt,
+        roles: validToken.user.roles.map(ur => ur.role.key)
+      }
+    }
   } catch (error) {
     console.error('重設密碼失敗:', error)
-    return false
+    return { success: false }
   }
 }
 

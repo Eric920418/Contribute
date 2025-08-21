@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { apiClient } from '@/lib/api/client'
 
@@ -27,10 +27,10 @@ export function useAuth() {
     error: null,
     isAuthenticated: false,
   })
-  const [hasChecked, setHasChecked] = useState(false) // 防止重複檢查的標記
+  const hasChecked = useRef(false) // 防止重複檢查的標記
 
-  const checkAuth = async () => {
-    if (hasChecked) return // 如果已經檢查過，就不要重複檢查
+  const checkAuth = useCallback(async () => {
+    if (hasChecked.current) return // 如果已經檢查過，就不要重複檢查
     
     try {
       setAuthState(prev => ({ ...prev, loading: true, error: null }))
@@ -43,7 +43,7 @@ export function useAuth() {
           error: null,
           isAuthenticated: true,
         })
-        setHasChecked(true)
+        hasChecked.current = true
         return response.data.user
       } else {
         // 明確處理沒有用戶的情況
@@ -53,7 +53,7 @@ export function useAuth() {
           error: null,
           isAuthenticated: false,
         })
-        setHasChecked(true)
+        hasChecked.current = true
         return null
       }
     } catch (error: any) {
@@ -64,10 +64,10 @@ export function useAuth() {
         error: error.response?.data?.error || '認證失敗',
         isAuthenticated: false,
       })
-      setHasChecked(true)
+      hasChecked.current = true
       return null
     }
-  }
+  }, [])
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string; user?: User; mustChangePassword?: boolean }> => {
     try {
@@ -85,7 +85,7 @@ export function useAuth() {
           error: null,
           isAuthenticated: true,
         })
-        setHasChecked(true) // 登入成功後標記為已檢查
+        hasChecked.current = true // 登入成功後標記為已檢查
         return { success: true, user: response.data.user, mustChangePassword: response.data.mustChangePassword }
       }
     } catch (error: any) {
@@ -114,7 +114,7 @@ export function useAuth() {
         error: null,
         isAuthenticated: false,
       })
-      setHasChecked(false) // 登出後重置檢查標記
+      hasChecked.current = false // 登出後重置檢查標記
       router.push('/login')
     }
   }
@@ -128,9 +128,8 @@ export function useAuth() {
   }
 
   useEffect(() => {
-    // 完全停用自動檢查，避免循環問題
-    // checkAuth()
-  }, [])
+    checkAuth()
+  }, [checkAuth])
 
   return {
     ...authState,

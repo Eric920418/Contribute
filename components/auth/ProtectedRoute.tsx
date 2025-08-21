@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 
@@ -19,11 +19,15 @@ export default function ProtectedRoute({
 }: ProtectedRouteProps) {
   const router = useRouter()
   const { user, loading, isAuthenticated, hasAnyRole, checkAuth } = useAuth()
+  const hasCheckedAuth = useRef(false)
   
   // 在ProtectedRoute中手動觸發認證檢查
   useEffect(() => {
-    checkAuth()
-  }, [checkAuth])
+    if (!hasCheckedAuth.current) {
+      hasCheckedAuth.current = true
+      checkAuth()
+    }
+  }, [])
 
   useEffect(() => {
     if (!loading) {

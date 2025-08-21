@@ -10,9 +10,9 @@ export async function POST(request: NextRequest) {
     const validatedData = resetPasswordSchema.parse(body)
     
     // 重設密碼
-    const success = await resetPassword(validatedData.token, validatedData.password)
+    const result = await resetPassword(validatedData.token, validatedData.password)
     
-    if (!success) {
+    if (!result.success) {
       return NextResponse.json(
         { error: '重設連結無效或已過期' },
         { status: 400 }
@@ -20,7 +20,8 @@ export async function POST(request: NextRequest) {
     }
     
     return NextResponse.json({
-      message: '密碼重設成功，請使用新密碼登入'
+      message: '密碼重設成功，正在導向...',
+      user: result.user
     })
   } catch (error) {
     console.error('重設密碼 API 錯誤:', error)

@@ -65,7 +65,19 @@ export default function ForceChangePasswordPage() {
 
       if (response.ok) {
         alert(data.message || '密碼更改成功！')
-        router.push('/dashboard')
+        
+        // 根據用戶角色跳轉到對應頁面
+        const userRoles = data.user?.roles || []
+        if (userRoles.includes('EDITOR') || userRoles.includes('CHIEF_EDITOR')) {
+          router.push('/editor/dashboard')
+        } else if (userRoles.includes('REVIEWER')) {
+          router.push('/reviewer/dashboard')
+        } else if (userRoles.includes('AUTHOR')) {
+          router.push('/author')
+        } else {
+          // 預設跳轉到作者頁面
+          router.push('/author')
+        }
       } else {
         console.error('密碼更改失敗:', data)
         alert(data.error || '更改失敗，請稍後再試')

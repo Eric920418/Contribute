@@ -26,6 +26,16 @@ export interface PasswordResetEmailData {
   appUrl: string
 }
 
+export interface InvitationEmailData {
+  to: string
+  name: string
+  role: string
+  temporaryPassword: string
+  loginUrl: string
+  appName: string
+  appUrl: string
+}
+
 export class EmailService {
   private transporter: nodemailer.Transporter
   private config: EmailConfig
@@ -105,6 +115,41 @@ export class EmailService {
       return true
     } catch (error) {
       console.error('發送密碼重設郵件失敗:', error)
+      if (error instanceof Error) {
+        console.error('錯誤詳情:', error.message)
+        console.error('錯誤堆疊:', error.stack)
+      }
+      return false
+    }
+  }
+
+  async sendInvitationEmail(data: InvitationEmailData): Promise<boolean> {
+    try {
+      console.log(`開始發送邀請郵件到 ${data.to}...`)
+      
+      const htmlContent = this.generateInvitationEmailHTML(data)
+      const textContent = this.generateInvitationEmailText(data)
+
+      const mailOptions = {
+        from: this.config.from,
+        to: data.to,
+        subject: `${data.appName} - 邀請您加入研討會管理系統`,
+        text: textContent,
+        html: htmlContent
+      }
+
+      console.log('郵件配置:', {
+        from: mailOptions.from,
+        to: mailOptions.to,
+        subject: mailOptions.subject
+      })
+
+      const result = await this.transporter.sendMail(mailOptions)
+      console.log('邀請郵件發送結果:', result)
+
+      return true
+    } catch (error) {
+      console.error('發送邀請郵件失敗:', error)
       if (error instanceof Error) {
         console.error('錯誤詳情:', error.message)
         console.error('錯誤堆疊:', error.stack)
@@ -384,6 +429,180 @@ ${data.appName} - 重設您的密碼
 
 此郵件由 ${data.appName} 自動發送，請勿回覆。
 如有問題，請聯繫我們的客服團隊。
+
+${data.appUrl}
+`
+  }
+
+  private generateInvitationEmailHTML(data: InvitationEmailData): string {
+    const roleText = data.role === 'CHIEF_EDITOR' ? '主編' : data.role === 'EDITOR' ? '編輯' : '審稿人'
+    
+    return `
+<!DOCTYPE html>
+<html lang="zh-TW" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>邀請您加入研討會管理系統</title>
+  <style>
+    body { margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; }
+    .email-wrapper { max-width: 600px; margin: 0 auto; background: #ffffff; }
+    .header { background: #A855F7; padding: 40px 20px; text-align: center; }
+    .header h1 { color: #ffffff; margin: 0; font-size: 28px; font-weight: 600; }
+    .content { padding: 40px 20px; }
+    .greeting { font-size: 20px; color: #333333; margin-bottom: 20px; }
+    .message { font-size: 16px; color: #666666; line-height: 1.6; margin-bottom: 30px; }
+    .credentials-box { 
+      background: #f8f9fa; 
+      border: 2px solid #A855F7; 
+      border-radius: 8px; 
+      padding: 20px; 
+      margin: 30px 0; 
+    }
+    .credential-item { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      margin: 10px 0; 
+      padding: 10px; 
+      background: white; 
+      border-radius: 4px; 
+    }
+    .credential-label { 
+      font-weight: bold; 
+      color: #333333; 
+    }
+    .credential-value { 
+      font-family: 'Courier New', monospace; 
+      color: #A855F7; 
+      font-weight: bold; 
+    }
+    .login-button { 
+      background: #A855F7; 
+      color: #ffffff; 
+      text-decoration: none; 
+      padding: 15px 30px; 
+      border-radius: 8px; 
+      display: inline-block; 
+      font-weight: bold; 
+      margin: 20px 0;
+    }
+    .warning { 
+      background: #fff3cd; 
+      border-left: 4px solid #ffc107; 
+      padding: 15px; 
+      margin: 20px 0; 
+      color: #856404; 
+      font-size: 14px; 
+    }
+    .footer { 
+      background: #f8f9fa; 
+      padding: 20px; 
+      text-align: center; 
+      color: #666666; 
+      font-size: 12px; 
+    }
+    .footer a { color: #A855F7; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="email-wrapper">
+    <div class="header">
+      <h1>${data.appName}</h1>
+    </div>
+    
+    <div class="content">
+      <div class="greeting">您好，${data.name}！</div>
+      
+      <div class="message">
+        恭喜您！您已被邀請加入 <strong>${data.appName}</strong> 擔任 <strong>${roleText}</strong> 的角色。
+      </div>
+      
+      <div class="message">
+        為了開始使用系統，我們已為您創建了帳戶。以下是您的登入資訊：
+      </div>
+      
+      <div class="credentials-box">
+        <div class="credential-item">
+          <span class="credential-label">電子郵件：</span>
+          <span class="credential-value">${data.to}</span>
+        </div>
+        <div class="credential-item">
+          <span class="credential-label">臨時密碼：</span>
+          <span class="credential-value">${data.temporaryPassword}</span>
+        </div>
+        <div class="credential-item">
+          <span class="credential-label">您的角色：</span>
+          <span class="credential-value">${roleText}</span>
+        </div>
+      </div>
+      
+      <div style="text-align: center;">
+        <a href="${data.loginUrl}" class="login-button text-white">立即登入系統</a>
+      </div>
+      
+      <div class="message">
+        <strong>重要說明：</strong>
+        <ul>
+          <li>請使用上述臨時密碼首次登入</li>
+          <li>登入後請立即修改密碼以確保帳戶安全</li>
+          <li>如果您忘記密碼，可以使用「忘記密碼」功能重設</li>
+          <li>如有任何問題，請聯繫系統管理員</li>
+        </ul>
+      </div>
+      
+      <div class="warning">
+        <strong>安全提醒：</strong><br>
+        • 請妥善保管您的登入資訊<br>
+        • 不要與他人分享您的密碼<br>
+        • 定期更新密碼以維護帳戶安全<br>
+        • 如果您沒有申請此帳戶，請立即聯繫我們
+      </div>
+    </div>
+    
+    <div class="footer">
+      <p>此郵件由 <a href="${data.appUrl}">${data.appName}</a> 自動發送，請勿回覆</p>
+      <p>如有問題，請聯繫我們的系統管理員</p>
+    </div>
+  </div>
+</body>
+</html>`
+  }
+
+  private generateInvitationEmailText(data: InvitationEmailData): string {
+    const roleText = data.role === 'CHIEF_EDITOR' ? '主編' : data.role === 'EDITOR' ? '編輯' : '審稿人'
+    
+    return `
+${data.appName} - 邀請您加入研討會管理系統
+
+您好，${data.name}！
+
+恭喜您！您已被邀請加入 ${data.appName} 擔任 ${roleText} 的角色。
+
+為了開始使用系統，我們已為您創建了帳戶。以下是您的登入資訊：
+
+電子郵件：${data.to}
+臨時密碼：${data.temporaryPassword}
+您的角色：${roleText}
+
+請點擊以下連結登入系統：
+${data.loginUrl}
+
+重要說明：
+• 請使用上述臨時密碼首次登入
+• 登入後請立即修改密碼以確保帳戶安全
+• 如果您忘記密碼，可以使用「忘記密碼」功能重設
+• 如有任何問題，請聯繫系統管理員
+
+安全提醒：
+• 請妥善保管您的登入資訊
+• 不要與他人分享您的密碼
+• 定期更新密碼以維護帳戶安全
+• 如果您沒有申請此帳戶，請立即聯繫我們
+
+此郵件由 ${data.appName} 自動發送，請勿回覆。
+如有問題，請聯繫我們的系統管理員。
 
 ${data.appUrl}
 `

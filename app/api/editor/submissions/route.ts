@@ -19,6 +19,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
     const conferenceYear = searchParams.get('year') ? parseInt(searchParams.get('year')!) : 2025
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
+    const limit = Math.max(1, Math.min(50, parseInt(searchParams.get('limit') || '10'))) // 限制每頁最多50筆
 
     // 取得會議資料
     const conference = await prisma.conference.findFirst({
@@ -41,6 +43,11 @@ export async function GET(request: NextRequest) {
     if (status && status !== 'all') {
       whereCondition.status = status as SubmissionStatus
     }
+
+    // 計算總數
+    const total = await prisma.submission.count({ where: whereCondition })
+    const totalPages = Math.ceil(total / limit)
+    const skip = (page - 1) * limit
 
     const submissions = await prisma.submission.findMany({
       where: whereCondition,
@@ -80,7 +87,9 @@ export async function GET(request: NextRequest) {
           select: { displayName: true, email: true }
         }
       },
-      orderBy: { submittedAt: 'desc' }
+      orderBy: { submittedAt: 'desc' },
+      skip,
+      take: limit
     })
 
     // 統計資料
@@ -115,18 +124,33 @@ export async function GET(request: NextRequest) {
         ? new Date(submission.reviewAssignments[0].dueAt).toISOString().split('T')[0]
         : undefined,
       serialNumber: submission.serialNumber,
-      creator: submission.creator
+      creator: submission.creator,
+      // 新增審稿相關欄位
+      reviewStatus: getReviewStatus(submission.reviewAssignments),
+      assignDate: submission.reviewAssignments[0]?.createdAt 
+        ? new Date(submission.reviewAssignments[0].createdAt).toISOString().split('T')[0]
+        : null,
+      recommendation: getRecommendation(submission.reviewAssignments),
+      finalDecision: submission.decisions[0]?.result || null
     }))
 
     return NextResponse.json({
       submissions: formattedSubmissions,
       stats: {
-        total: formattedSubmissions.length,
+        total: total, // 使用實際總數而非當前頁數量
         submitted: statsMap.SUBMITTED || 0,
         underReview: statsMap.UNDER_REVIEW || 0,
         revisionRequired: statsMap.REVISION_REQUIRED || 0,
         accepted: statsMap.ACCEPTED || 0,
         rejected: statsMap.REJECTED || 0
+      },
+      pagination: {
+        total,
+        totalPages,
+        currentPage: page,
+        limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
       },
       conference
     })
@@ -172,4 +196,52 @@ function calculatePriority(submission: any): 'high' | 'medium' | 'low' {
     return 'medium'
   }
   return 'low'
+}
+
+// 審稿狀態計算函數
+function getReviewStatus(reviewAssignments: any[]): string {
+  if (!reviewAssignments || reviewAssignments.length === 0) {
+    return '待分配'
+  }
+  
+  const completedReviews = reviewAssignments.filter(ra => ra.review?.submittedAt)
+  const totalReviews = reviewAssignments.length
+  
+  if (completedReviews.length === totalReviews) {
+    return '已完成'
+  } else if (completedReviews.length > 0) {
+    return `進行中 (${completedReviews.length}/${totalReviews})`
+  } else {
+    return '進行中'
+  }
+}
+
+// 審稿建議計算函數
+function getRecommendation(reviewAssignments: any[]): string | null {
+  if (!reviewAssignments || reviewAssignments.length === 0) {
+    return null
+  }
+  
+  const completedReviews = reviewAssignments.filter(ra => ra.review?.submittedAt)
+  
+  if (completedReviews.length === 0) {
+    return null
+  }
+  
+  // 如果有多個審稿，顯示主要建議
+  const recommendations = completedReviews.map(ra => ra.review.recommendation)
+  const acceptCount = recommendations.filter(r => r === 'ACCEPT').length
+  const rejectCount = recommendations.filter(r => r === 'REJECT').length
+  const minorRevisionCount = recommendations.filter(r => r === 'MINOR_REVISION').length
+  const majorRevisionCount = recommendations.filter(r => r === 'MAJOR_REVISION').length
+  
+  if (acceptCount > rejectCount) {
+    return '建議接受'
+  } else if (rejectCount > acceptCount) {
+    return '建議拒絕'
+  } else if (minorRevisionCount > 0 || majorRevisionCount > 0) {
+    return '建議修改'
+  }
+  
+  return '審稿中'
 }
