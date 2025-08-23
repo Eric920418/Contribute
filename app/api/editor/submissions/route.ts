@@ -56,9 +56,12 @@ export async function GET(request: NextRequest) {
           orderBy: { isCorresponding: 'desc' }
         },
         files: {
-          where: { kind: 'MANUSCRIPT' },
-          orderBy: { version: 'desc' },
-          take: 1
+          where: { 
+            kind: { 
+              in: ['MANUSCRIPT_ANONYMOUS', 'TITLE_PAGE'] 
+            } 
+          },
+          orderBy: { version: 'desc' }
         },
         decisions: {
           orderBy: { decidedAt: 'desc' },
@@ -107,6 +110,7 @@ export async function GET(request: NextRequest) {
       return acc
     }, {} as Record<string, number>)
 
+
     // 轉換資料格式以符合前端期望
     const formattedSubmissions = submissions.map(submission => ({
       id: submission.id,
@@ -134,16 +138,19 @@ export async function GET(request: NextRequest) {
       finalDecision: submission.decisions[0]?.result || null
     }))
 
+    const finalStats = {
+      total: total, // 使用實際總數而非當前頁數量
+      submitted: statsMap.SUBMITTED || 0,
+      underReview: statsMap.UNDER_REVIEW || 0,
+      revisionRequired: statsMap.REVISION_REQUIRED || 0,
+      accepted: statsMap.ACCEPTED || 0,
+      rejected: statsMap.REJECTED || 0
+    }
+
+
     return NextResponse.json({
       submissions: formattedSubmissions,
-      stats: {
-        total: total, // 使用實際總數而非當前頁數量
-        submitted: statsMap.SUBMITTED || 0,
-        underReview: statsMap.UNDER_REVIEW || 0,
-        revisionRequired: statsMap.REVISION_REQUIRED || 0,
-        accepted: statsMap.ACCEPTED || 0,
-        rejected: statsMap.REJECTED || 0
-      },
+      stats: finalStats,
       pagination: {
         total,
         totalPages,

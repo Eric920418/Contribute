@@ -78,8 +78,6 @@ export async function POST(request: NextRequest) {
     
     return response
   } catch (error) {
-    console.error('強制改密碼 API 錯誤:', error)
-    
     if (error instanceof Error && error.name === 'ZodError') {
       return NextResponse.json(
         { error: '輸入資料格式不正確', details: error.message },

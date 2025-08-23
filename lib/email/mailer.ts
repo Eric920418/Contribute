@@ -36,6 +36,17 @@ export interface InvitationEmailData {
   appUrl: string
 }
 
+export interface ReviewerAssignmentEmailData {
+  to: string
+  reviewerName: string
+  submissionTitle: string
+  submissionId: string
+  dueDate?: Date
+  dashboardUrl: string
+  appName: string
+  appUrl: string
+}
+
 export class EmailService {
   private transporter: nodemailer.Transporter
   private config: EmailConfig
@@ -55,8 +66,6 @@ export class EmailService {
 
   async sendVerificationEmail(data: VerificationEmailData): Promise<boolean> {
     try {
-      console.log(`開始發送驗證郵件到 ${data.to}...`)
-      
       const htmlContent = this.generateVerificationEmailHTML(data)
       const textContent = this.generateVerificationEmailText(data)
 
@@ -68,30 +77,16 @@ export class EmailService {
         html: htmlContent
       }
 
-      console.log('郵件配置:', {
-        from: mailOptions.from,
-        to: mailOptions.to,
-        subject: mailOptions.subject
-      })
-
       const result = await this.transporter.sendMail(mailOptions)
-      console.log('郵件發送結果:', result)
 
       return true
     } catch (error) {
-      console.error('發送驗證郵件失敗:', error)
-      if (error instanceof Error) {
-        console.error('錯誤詳情:', error.message)
-        console.error('錯誤堆疊:', error.stack)
-      }
       return false
     }
   }
 
   async sendPasswordResetEmail(data: PasswordResetEmailData): Promise<boolean> {
     try {
-      console.log(`開始發送密碼重設郵件到 ${data.to}...`)
-      
       const htmlContent = this.generatePasswordResetEmailHTML(data)
       const textContent = this.generatePasswordResetEmailText(data)
 
@@ -103,30 +98,16 @@ export class EmailService {
         html: htmlContent
       }
 
-      console.log('郵件配置:', {
-        from: mailOptions.from,
-        to: mailOptions.to,
-        subject: mailOptions.subject
-      })
-
       const result = await this.transporter.sendMail(mailOptions)
-      console.log('密碼重設郵件發送結果:', result)
 
       return true
     } catch (error) {
-      console.error('發送密碼重設郵件失敗:', error)
-      if (error instanceof Error) {
-        console.error('錯誤詳情:', error.message)
-        console.error('錯誤堆疊:', error.stack)
-      }
       return false
     }
   }
 
   async sendInvitationEmail(data: InvitationEmailData): Promise<boolean> {
     try {
-      console.log(`開始發送邀請郵件到 ${data.to}...`)
-      
       const htmlContent = this.generateInvitationEmailHTML(data)
       const textContent = this.generateInvitationEmailText(data)
 
@@ -138,22 +119,31 @@ export class EmailService {
         html: htmlContent
       }
 
-      console.log('郵件配置:', {
-        from: mailOptions.from,
-        to: mailOptions.to,
-        subject: mailOptions.subject
-      })
-
       const result = await this.transporter.sendMail(mailOptions)
-      console.log('邀請郵件發送結果:', result)
 
       return true
     } catch (error) {
-      console.error('發送邀請郵件失敗:', error)
-      if (error instanceof Error) {
-        console.error('錯誤詳情:', error.message)
-        console.error('錯誤堆疊:', error.stack)
+      return false
+    }
+  }
+
+  async sendReviewerAssignmentEmail(data: ReviewerAssignmentEmailData): Promise<boolean> {
+    try {
+      const htmlContent = this.generateReviewerAssignmentEmailHTML(data)
+      const textContent = this.generateReviewerAssignmentEmailText(data)
+
+      const mailOptions = {
+        from: this.config.from,
+        to: data.to,
+        subject: `${data.appName} - 新的審稿任務：${data.submissionTitle}`,
+        text: textContent,
+        html: htmlContent
       }
+
+      const result = await this.transporter.sendMail(mailOptions)
+
+      return true
+    } catch (error) {
       return false
     }
   }
@@ -603,6 +593,192 @@ ${data.loginUrl}
 
 此郵件由 ${data.appName} 自動發送，請勿回覆。
 如有問題，請聯繫我們的系統管理員。
+
+${data.appUrl}
+`
+  }
+
+  private generateReviewerAssignmentEmailHTML(data: ReviewerAssignmentEmailData): string {
+    const dueDateText = data.dueDate ? new Date(data.dueDate).toLocaleDateString('zh-TW') : '尚未指定'
+    
+    return `
+<!DOCTYPE html>
+<html lang="zh-TW" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>新的審稿任務</title>
+  <style>
+    body { margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; }
+    .email-wrapper { max-width: 600px; margin: 0 auto; background: #ffffff; }
+    .header { background: #10B981; padding: 40px 20px; text-align: center; }
+    .header h1 { color: #ffffff; margin: 0; font-size: 28px; font-weight: 600; }
+    .content { padding: 40px 20px; }
+    .greeting { font-size: 20px; color: #333333; margin-bottom: 20px; }
+    .message { font-size: 16px; color: #666666; line-height: 1.6; margin-bottom: 30px; }
+    .submission-box { 
+      background: #f8f9fa; 
+      border: 2px solid #10B981; 
+      border-radius: 8px; 
+      padding: 20px; 
+      margin: 30px 0; 
+    }
+    .submission-item { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: flex-start; 
+      margin: 10px 0; 
+      padding: 10px; 
+      background: white; 
+      border-radius: 4px; 
+    }
+    .submission-label { 
+      font-weight: bold; 
+      color: #333333; 
+      min-width: 80px;
+    }
+    .submission-value { 
+      color: #10B981; 
+      font-weight: bold; 
+      flex: 1;
+      margin-left: 15px;
+    }
+    .dashboard-button { 
+      background: #10B981; 
+      color: #ffffff; 
+      text-decoration: none; 
+      padding: 15px 30px; 
+      border-radius: 8px; 
+      display: inline-block; 
+      font-weight: bold; 
+      margin: 20px 0;
+    }
+    .warning { 
+      background: #fff3cd; 
+      border-left: 4px solid #ffc107; 
+      padding: 15px; 
+      margin: 20px 0; 
+      color: #856404; 
+      font-size: 14px; 
+    }
+    .footer { 
+      background: #f8f9fa; 
+      padding: 20px; 
+      text-align: center; 
+      color: #666666; 
+      font-size: 12px; 
+    }
+    .footer a { color: #10B981; text-decoration: none; }
+  </style>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "EmailMessage",
+    "about": {
+      "@type": "ReviewAssignment",
+      "name": "審稿任務",
+      "description": "您有一個新的稿件需要審查：${data.submissionTitle}"
+    },
+    "sender": {
+      "@type": "Organization",
+      "name": "${data.appName}",
+      "url": "${data.appUrl}"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div class="email-wrapper">
+    <div class="header">
+      <h1>${data.appName}</h1>
+    </div>
+    
+    <div class="content">
+      <div class="greeting">親愛的 ${data.reviewerName} 審稿人，您好！</div>
+      
+      <div class="message">
+        您有一篇新的稿件需要審查。以下是詳細資訊：
+      </div>
+      
+      <div class="submission-box">
+        <div class="submission-item">
+          <span class="submission-label">稿件標題：</span>
+          <span class="submission-value">${data.submissionTitle}</span>
+        </div>
+        <div class="submission-item">
+          <span class="submission-label">稿件編號：</span>
+          <span class="submission-value">${data.submissionId}</span>
+        </div>
+        <div class="submission-item">
+          <span class="submission-label">截止日期：</span>
+          <span class="submission-value">${dueDateText}</span>
+        </div>
+      </div>
+      
+      <div style="text-align: center;">
+        <a href="${data.dashboardUrl}" class="dashboard-button" style="color: white;">前往審稿系統</a>
+      </div>
+      
+      <div class="message">
+        <strong>審稿須知：</strong>
+        <ul>
+          <li>請在截止日期前完成審稿</li>
+          <li>請客觀公正地評估稿件品質</li>
+          <li>提供具體的修改建議以幫助作者改進</li>
+          <li>如有利益衝突或其他問題，請及時聯繫編輯</li>
+        </ul>
+      </div>
+      
+      <div class="warning">
+        <strong>重要提醒：</strong><br>
+        • 審稿內容請保密，不得外洩<br>
+        • 如無法在期限內完成，請提前通知編輯<br>
+        • 請透過系統提交審稿意見，不要透過其他管道<br>
+        • 如有技術問題，請聯繫系統管理員
+      </div>
+    </div>
+    
+    <div class="footer">
+      <p>此郵件由 <a href="${data.appUrl}">${data.appName}</a> 自動發送，請勿回覆</p>
+      <p>如有問題，請聯繫編輯團隊</p>
+    </div>
+  </div>
+</body>
+</html>`
+  }
+
+  private generateReviewerAssignmentEmailText(data: ReviewerAssignmentEmailData): string {
+    const dueDateText = data.dueDate ? new Date(data.dueDate).toLocaleDateString('zh-TW') : '尚未指定'
+    
+    return `
+${data.appName} - 新的審稿任務：${data.submissionTitle}
+
+親愛的 ${data.reviewerName} 審稿人，您好！
+
+您有一篇新的稿件需要審查。以下是詳細資訊：
+
+稿件標題：${data.submissionTitle}
+稿件編號：${data.submissionId}
+截止日期：${dueDateText}
+
+請前往審稿系統查看詳細內容：
+${data.dashboardUrl}
+
+審稿須知：
+• 請在截止日期前完成審稿
+• 請客觀公正地評估稿件品質
+• 提供具體的修改建議以幫助作者改進
+• 如有利益衝突或其他問題，請及時聯繫編輯
+
+重要提醒：
+• 審稿內容請保密，不得外洩
+• 如無法在期限內完成，請提前通知編輯
+• 請透過系統提交審稿意見，不要透過其他管道
+• 如有技術問題，請聯繫系統管理員
+
+此郵件由 ${data.appName} 自動發送，請勿回覆。
+如有問題，請聯繫編輯團隊。
 
 ${data.appUrl}
 `

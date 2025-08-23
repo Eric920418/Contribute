@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { PrismaClient } from '@prisma/client'
 import { getSession } from '@/lib/auth/session'
+import { createEmailService, ReviewerAssignmentEmailData } from '@/lib/email/mailer'
 
 const prisma = new PrismaClient()
 
@@ -28,9 +29,14 @@ export async function POST(
 
     const submissionId = params.id
 
-    // 檢查投稿是否存在
+    // 檢查投稿是否存在並獲取詳細資訊
     const submission = await prisma.submission.findUnique({
-      where: { id: submissionId }
+      where: { id: submissionId },
+      select: {
+        id: true,
+        title: true,
+        status: true
+      }
     })
 
     if (!submission) {
@@ -48,6 +54,11 @@ export async function POST(
             }
           }
         }
+      },
+      select: {
+        id: true,
+        displayName: true,
+        email: true
       }
     })
 
@@ -90,8 +101,40 @@ export async function POST(
       data: { status: 'UNDER_REVIEW' }
     })
 
+    // 發送郵件通知給審稿人
+    try {
+      const emailService = createEmailService()
+      const dashboardUrl = `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/reviewer/dashboard`
+      
+      await Promise.all(
+        reviewers.map(async (reviewer) => {
+          const emailData: ReviewerAssignmentEmailData = {
+            to: reviewer.email,
+            reviewerName: reviewer.displayName,
+            submissionTitle: submission.title,
+            submissionId: submission.id,
+            dueDate: dueDate ? new Date(dueDate) : undefined,
+            dashboardUrl,
+            appName: process.env.APP_NAME || '科技學術研討會平台',
+            appUrl: process.env.NEXTAUTH_URL || 'http://localhost:3000'
+          }
+
+          console.log(`發送審稿通知郵件給: ${reviewer.email}`)
+          const emailSent = await emailService.sendReviewerAssignmentEmail(emailData)
+          
+          if (!emailSent) {
+            console.error(`審稿通知郵件發送失敗: ${reviewer.email}`)
+          } else {
+            console.log(`審稿通知郵件發送成功: ${reviewer.email}`)
+          }
+        })
+      )
+    } catch (emailError) {
+      console.error('發送審稿通知郵件時發生錯誤:', emailError)
+    }
+
     return NextResponse.json({
-      message: '審稿人分配成功',
+      message: '審稿人分配成功，已發送通知郵件',
       assignments
     })
   } catch (error) {

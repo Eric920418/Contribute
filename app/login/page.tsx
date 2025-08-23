@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Eye, EyeOff, PenTool, FileText, Users } from 'lucide-react'
 import Header from '@/components/layout/Header'
 import Footer from '@/components/layout/Footer'
-import { useAuth } from '@/hooks/useAuth'
+import { apiClient } from '@/lib/api/client'
 
 type UserRole = 'author' | 'reviewer' | 'editor'
 
@@ -33,7 +33,6 @@ const roles = [
 
 export default function LoginPage() {
   const router = useRouter()
-  const { login, isAuthenticated, loading: authLoading, user } = useAuth()
   const [selectedRole, setSelectedRole] = useState<UserRole>('author')
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -51,7 +50,7 @@ export default function LoginPage() {
         if (response.ok) {
           const data = await response.json()
           if (data.user) {
-            console.log('用戶已登入，自動跳轉到對應身份頁面')
+            
             // 根據用戶角色決定跳轉目標
             if (data.user.roles.includes('EDITOR') || data.user.roles.includes('CHIEF_EDITOR')) {
               window.location.href = '/editor/dashboard'
@@ -97,8 +96,17 @@ export default function LoginPage() {
         return
       }
 
-      // 使用 useAuth hook 登入
-      const result = await login(formData.account, formData.password)
+      // 直接使用 API 登入
+      const response = await apiClient.post('/auth/login', {
+        email: formData.account,
+        password: formData.password
+      })
+      
+      const result = {
+        success: true,
+        user: response.data.user,
+        mustChangePassword: response.data.mustChangePassword
+      }
 
       if (!result.success) {
         setError(result.error || '登入失敗')
@@ -133,21 +141,21 @@ export default function LoginPage() {
         }
         
         // 登入成功後延遲跳轉，確保session cookie設置完成
-        console.log('登入成功，準備跳轉到選擇的角色頁面:', selectedRole)
+        
         
         // 使用setTimeout確保session cookie已經設置
         setTimeout(() => {
           switch (selectedRole) {
             case 'author':
-              console.log('跳轉到投稿者頁面')
+              
               window.location.href = '/author'
               break
             case 'reviewer':
-              console.log('跳轉到審稿人頁面')
+              
               window.location.href = '/reviewer/dashboard'
               break
             case 'editor':
-              console.log('跳轉到編輯頁面')
+              
               window.location.href = '/editor/dashboard'
               break
             default:
@@ -156,8 +164,8 @@ export default function LoginPage() {
         }, 100) // 短暫延遲確保cookie設置完成
       }
     } catch (error: any) {
-      console.error('登入錯誤:', error)
-      setError('登入失敗，請稍後再試')
+      
+      setError(error.response?.data?.error || '登入失敗，請稍後再試')
     } finally {
       setIsLoading(false)
     }

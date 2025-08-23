@@ -23,6 +23,8 @@ const nextConfig = {
     });
     return config;
   },
+  // 生產環境輸出配置
+  output: 'standalone',
 }
 
 module.exports = nextConfig

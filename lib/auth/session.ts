@@ -35,7 +35,6 @@ export function verifySession(token: string): SessionData | null {
     
     return decoded
   } catch (error) {
-    console.error('JWT verification failed:', (error as Error).message)
     return null
   }
 }
@@ -55,51 +54,13 @@ export async function getSession(): Promise<SessionData | null> {
     }
 
     // 暫時直接返回 JWT 中的資料，避免資料庫查詢問題
-    console.log('Session data from JWT:', sessionData)
     return sessionData
-
-    // TODO: 修復資料庫查詢問題後再啟用下面的邏輯
-    /*
-    // 驗證使用者是否仍然存在且有效
-    const user = await prisma.user.findUnique({
-      where: { id: sessionData.userId },
-      include: {
-        roles: {
-          include: {
-            role: true
-          }
-        }
-      }
-    })
-
-    if (!user) {
-      console.error('User not found in database:', sessionData.userId)
-      return null
-    }
-
-    return {
-      userId: user.id,
-      email: user.email,
-      displayName: user.displayName,
-      roles: user.roles.map(ur => ur.role.key)
-    }
-    */
   } catch (error) {
-    console.error('獲取 session 失敗:', error)
     return null
   }
 }
 
 export function setSessionCookie(response: NextResponse, token: string): void {
-  console.log('setSessionCookie called with:', {
-    cookieName: SESSION_COOKIE,
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: SESSION_DURATION / 1000,
-    path: '/',
-    nodeEnv: process.env.NODE_ENV
-  })
   
   response.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -108,8 +69,6 @@ export function setSessionCookie(response: NextResponse, token: string): void {
     maxAge: SESSION_DURATION / 1000,
     path: '/'
   })
-  
-  console.log('Cookie set completed')
 }
 
 export function clearSessionCookie(response: NextResponse): void {

@@ -32,17 +32,6 @@ interface ReviewResult {
   details: string
 }
 
-interface Reviewer {
-  id: string
-  displayName: string
-  email: string
-  orcid?: string
-  currentAssignments: number
-  completedReviews: number
-  isAvailable: boolean
-  expertise: string[]
-  averageResponseTime?: number | null
-}
 
 export default function SubmissionDetailPage() {
   const params = useParams()
@@ -56,38 +45,39 @@ export default function SubmissionDetailPage() {
   
   const [submission, setSubmission] = useState<Submission | null>(null)
   const [loading, setLoading] = useState(true)
-  const [showAssignModal, setShowAssignModal] = useState(false)
   const [editorDecision, setEditorDecision] = useState('')
   const [decisionText, setDecisionText] = useState('')
   const [publishOnlineChecked, setPublishOnlineChecked] = useState(false)
   const [publishPhysicalChecked, setPublishPhysicalChecked] = useState(false)
   const [rejectChecked, setRejectChecked] = useState(false)
-  
-  // 指派審稿人相關狀態
-  const [availableReviewers, setAvailableReviewers] = useState<Reviewer[]>([])
-  const [selectedReviewers, setSelectedReviewers] = useState<string[]>([])
-  const [reviewDueDate, setReviewDueDate] = useState('')
-  const [isAssigning, setIsAssigning] = useState(false)
-  const [invitationContent, setInvitationContent] = useState('')
   const [error, setError] = useState('')
 
   // 左側邊欄稿件列表
-  const submissionList = [
-    { id: '230', current: true },
-    { id: '231', current: false },
-    { id: '232', current: false },
-    { id: '233', current: false },
-    { id: '234', current: false },
-    { id: '235', current: false },
-    { id: '236', current: false },
-    { id: '237', current: false },
-    { id: '238', current: false },
-    { id: '239', current: false },
-    { id: '240', current: false },
-  ]
-
-  // 模擬審稿結果
-  const reviewResults: ReviewResult[] = []
+  const [submissionList, setSubmissionList] = useState<{id: string, title: string, current: boolean}[]>([])
+  
+  // 審稿結果
+  const [reviewResults, setReviewResults] = useState<ReviewResult[]>([])
+  
+  // 已指派的審稿人
+  const [assignedReviewers, setAssignedReviewers] = useState<any[]>([])
+  
+  // 載入稿件列表
+  const loadSubmissionsList = async () => {
+    try {
+      const response = await fetch('/api/editor/submissions?limit=50')
+      if (response.ok) {
+        const data = await response.json()
+        const list = data.submissions.map((sub: any) => ({
+          id: sub.id,
+          title: sub.title,
+          current: sub.id === submissionId
+        }))
+        setSubmissionList(list)
+      }
+    } catch (error) {
+      console.error('Failed to load submissions list:', error)
+    }
+  }
 
   const handleTabClick = (tab: string) => {
     setActiveTab(tab)
@@ -110,163 +100,62 @@ export default function SubmissionDetailPage() {
   useEffect(() => {
     if (submissionId) {
       fetchSubmissionDetails()
+      loadSubmissionsList()
     }
   }, [submissionId])
 
   const fetchSubmissionDetails = async () => {
     try {
       setLoading(true)
-      // 模擬 API 調用
-      const mockSubmission: Submission = {
-        id: '230',
-        title: '結合生成式人工智慧與數位思考於國小創意寫作課程之教學設計與實施：對學生心理健康之影響',
-        author: '本研究旨在探討數位敘事結合AI創意生成技術應用於國小社會領域課程之實踐成效與教學應用。透過引導學生運用文本創作、語音輸入以及影像生成工具，自主建構數位內容並產出創作品，促進其對歷史主題之文化認知及公民素養增能，培養創新數位敘事能力、研究採用研究數設計，於某國小輔行教學實驗，蒐集學生作品、訪談資料與連續觀察紀錄進行質性分析。',
-        abstract: '本研究旨在探討數位敘事結合AI創意生成技術應用於國小社會領域課程之實踐成效與教學應用。透過引導學生運用文本創作、語音輸入以及影像生成工具，自主建構數位內容並產出創作品，促進其對歷史主題之文化認知及公民素養增能，培養創新數位敘事能力、研究採用研究數設計，於某國小輔行教學實驗，蒐集學生作品、訪談資料與連續觀察紀錄進行質性分析。',
-        keywords: '建構思維、人工智慧技術優學數位數、21世紀技能/批判性思考能力',
-        submittedAt: '2025/06/10',
-        files: [
-          { name: '231_原名稿件.docx', url: '#' },
-          { name: '231_修正稿.docx', url: '#' }
-        ]
+      const response = await fetch(`/api/editor/submissions/${submissionId}`)
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const data = await response.json()
+      const submissionData = data.submission
+      
+      // 轉換資料格式以符合 Submission 介面
+      const formattedSubmission: Submission = {
+        id: submissionData.id,
+        title: submissionData.title,
+        author: submissionData.authors.map((author: any) => author.name).join('、'),
+        abstract: submissionData.abstract,
+        keywords: submissionData.keywords || '',
+        submittedAt: submissionData.submittedAt ? new Date(submissionData.submittedAt).toLocaleDateString('zh-TW') : '',
+        files: submissionData.files.map((file: any) => ({
+          name: file.originalName,
+          url: `/api/files/${file.id}/download` // 假設有檔案下載 API
+        }))
       }
 
-      setSubmission(mockSubmission)
+      setSubmission(formattedSubmission)
+      
+      // 保存已指派的審稿人（包括未完成的）
+      setAssignedReviewers(submissionData.reviewAssignments || [])
+      
+      // 轉換審稿結果（只顯示已完成的）
+      const reviews = submissionData.reviewAssignments
+        .filter((assignment: any) => assignment.review?.submittedAt)
+        .map((assignment: any) => ({
+          reviewer: assignment.reviewer.displayName,
+          recommendation: getRecommendationText(assignment.review.recommendation),
+          submittedDate: new Date(assignment.review.submittedAt).toLocaleDateString('zh-TW'),
+          rating: assignment.review.score.toString(),
+          details: assignment.review.commentToEditor || '無詳細評論'
+        }))
+      
+      setReviewResults(reviews)
+      
     } catch (err) {
       console.error('Error fetching submission:', err)
+      setError('載入稿件詳情失敗: ' + (err instanceof Error ? err.message : '未知錯誤'))
     } finally {
       setLoading(false)
     }
   }
 
-  const handleAssignReviewer = async () => {
-    setShowAssignModal(true)
-    await loadAvailableReviewers()
-    
-    // 設定默認的回覆截止日期（30天後）
-    const defaultDueDate = new Date()
-    defaultDueDate.setDate(defaultDueDate.getDate() + 30)
-    setReviewDueDate(defaultDueDate.toISOString().split('T')[0])
-
-    // 設定默認的邀請內容
-    const defaultInvitation = `親愛的審稿人，您好：
-
-我們誠摯地邀請您擔任以下論文的審稿人：
-
-論文標題：${submission?.title || ''}
-
-摘要：
-${submission?.abstract || ''}
-
-關鍵字：${submission?.keywords || ''}
-
-請您在截止日期前提供您寶貴的審稿意見，包含：
-1. 論文的學術價值和創新性
-2. 研究方法的嚴謹性
-3. 論述的邏輯性和完整性
-4. 語言表達和格式規範
-5. 修改建議或評審結論
-
-感謝您對學術社群的貢獻。
-
-此致
-敬禮
-
-國立臺北教育大學課程與教學傳播科技研究所`
-
-    setInvitationContent(defaultInvitation)
-  }
-  
-  const loadAvailableReviewers = async () => {
-    try {
-      setError('')
-      // 模擬 API 調用 - 實際應該從 /api/editor/reviewers 獲取
-      const mockReviewers: Reviewer[] = [
-        {
-          id: '1',
-          displayName: '李四教授',
-          email: 'li@example.edu.tw',
-          currentAssignments: 2,
-          completedReviews: 15,
-          isAvailable: true,
-          expertise: ['人工智慧', '教育科技']
-        },
-        {
-          id: '2',
-          displayName: '王五博士',
-          email: 'wang@example.edu.tw',
-          currentAssignments: 1,
-          completedReviews: 8,
-          isAvailable: true,
-          expertise: ['學習分析', '數位學習']
-        },
-        {
-          id: '3',
-          displayName: '張三副教授',
-          email: 'zhang@example.edu.tw',
-          currentAssignments: 4,
-          completedReviews: 23,
-          isAvailable: false,
-          expertise: ['教育心理學', '認知科學']
-        }
-      ]
-      
-      setAvailableReviewers(mockReviewers)
-    } catch (error: any) {
-      setError('載入審稿人列表失敗: ' + (error.response?.data?.error || error.message))
-    }
-  }
-
-  const handleReviewerToggle = (reviewerId: string) => {
-    setSelectedReviewers(prev => 
-      prev.includes(reviewerId)
-        ? prev.filter(id => id !== reviewerId)
-        : [...prev, reviewerId]
-    )
-  }
-
-  const handleAssignSubmit = async () => {
-    if (selectedReviewers.length === 0) {
-      setError('請至少選擇一位審稿人')
-      return
-    }
-
-    try {
-      setIsAssigning(true)
-      setError('')
-
-      // 模擬 API 調用 - 實際應該調用 /api/editor/submissions/[id]/assign-reviewer
-      console.log('Assigning reviewers:', {
-        submissionId,
-        reviewerIds: selectedReviewers,
-        dueDate: reviewDueDate,
-        invitationContent
-      })
-      
-      // 模擬成功
-      setTimeout(() => {
-        setIsAssigning(false)
-        setShowAssignModal(false)
-        setSelectedReviewers([])
-        setReviewDueDate('')
-        setInvitationContent('')
-        setError('')
-        // 可以在這裡顯示成功消息或重新載入頁面
-      }, 2000)
-      
-    } catch (error: any) {
-      setError('指派審稿人失敗: ' + (error.response?.data?.error || error.message))
-    } finally {
-      setIsAssigning(false)
-    }
-  }
-
-  const handleCloseAssignModal = () => {
-    setShowAssignModal(false)
-    setSelectedReviewers([])
-    setReviewDueDate('')
-    setInvitationContent('')
-    setError('')
-  }
 
   const handleDecisionSubmit = () => {
     console.log('Editor Decision:', {
@@ -292,6 +181,30 @@ ${submission?.abstract || ''}
     )
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header />
+        <div className="flex justify-center items-center h-96">
+          <div className="text-center">
+            <div className="text-lg text-red-600 mb-4">載入失敗</div>
+            <div className="text-sm text-gray-600 mb-4">{error}</div>
+            <button 
+              onClick={() => {
+                setError('')
+                fetchSubmissionDetails()
+              }}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            >
+              重試
+            </button>
+          </div>
+        </div>
+        <Footer />
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gray-100">
       <Header />
@@ -299,7 +212,7 @@ ${submission?.abstract || ''}
         className="flex-1 px-4 py-8 md:px-14 md:py-14 bg-gray-100"
         style={{ overflow: 'visible' }}
       >
-        <div className="flex flex-col max-w-7xl mx-auto bg-gray-100">
+        <div className="flex flex-col w-full md:max-w-7xl md:mx-auto bg-gray-100">
           {/* 身份識別區域 */}
           <div className="mb-8 md:mb-[56px]">
             <div className="flex flex-col md:flex-row rounded-lg shadow-sm min-h-[132px]">
@@ -359,7 +272,7 @@ ${submission?.abstract || ''}
             <div className="w-64 bg-white border-r min-h-screen">
               {/* 稿件ID顯示 */}
               <div className="p-4 border-b">
-                <div className="text-sm text-gray-500">稿件ID：230</div>
+                <div className="text-sm text-gray-500">稿件ID：{submissionId}</div>
               </div>
 
               {/* 稿件列表 */}
@@ -371,13 +284,18 @@ ${submission?.abstract || ''}
                   {submissionList.map(item => (
                     <div
                       key={item.id}
+                      onClick={() => router.push(`/editor/submissions/${item.id}`)}
                       className={`p-2 text-sm rounded cursor-pointer ${
                         item.current
                           ? 'bg-purple-100 text-purple-700 border-l-3 border-purple-500'
                           : 'text-gray-600 hover:bg-gray-50'
                       }`}
+                      title={item.title}
                     >
-                      稿件ID：{item.id}
+                      <div className="font-medium">稿件ID：{item.id}</div>
+                      <div className="text-xs mt-1 truncate opacity-75">
+                        {item.title.length > 25 ? item.title.substring(0, 25) + '...' : item.title}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -456,22 +374,106 @@ ${submission?.abstract || ''}
 
                   {/* 管理審稿人區塊 */}
                   <div className="bg-white">
-                    <div className="flex justify-between items-center mb-6">
-                      <h2 className="text-xl font-bold text-gray-900">
-                        管理審稿人
-                      </h2>
-                      <button
-                        onClick={handleAssignReviewer}
-                        className="bg-purple-500 hover:bg-purple-600 text-white px-6 py-2 rounded-lg flex items-center"
-                      >
-                        <span className="mr-2">+</span>
-                        指派審稿人
-                      </button>
-                    </div>
+                    <h2 className="text-xl font-bold text-gray-900 mb-6">
+                      管理審稿人
+                    </h2>
 
-                    <div className="text-center py-8 text-gray-500">
-                      「尚未指派審稿人」
-                    </div>
+                    {loading ? (
+                      <div className="text-center py-8 text-gray-500">
+                        載入中...
+                      </div>
+                    ) : assignedReviewers.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        「尚未指派審稿人」
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b border-gray-200">
+                              <th className="text-left py-3 px-4 font-medium text-gray-700">
+                                審稿人
+                              </th>
+                              <th className="text-left py-3 px-4 font-medium text-gray-700">
+                                指派日期
+                              </th>
+                              <th className="text-left py-3 px-4 font-medium text-gray-700">
+                                邀請回覆
+                              </th>
+                              <th className="text-left py-3 px-4 font-medium text-gray-700">
+                                審查截止日
+                              </th>
+                              <th className="text-left py-3 px-4 font-medium text-gray-700">
+                                審稿進度
+                              </th>
+                              <th className="text-left py-3 px-4 font-medium text-gray-700">
+                                操作
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {assignedReviewers.map((assignment: any) => (
+                              <tr key={assignment.id} className="border-b border-gray-100">
+                                <td className="py-4 px-4">
+                                  <div>
+                                    <div className="font-medium text-gray-900">
+                                      {assignment.reviewer.displayName}
+                                    </div>
+                                    <div className="text-sm text-gray-600">
+                                      {assignment.reviewer.affiliation || '單位資訊待完善'}
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-1">
+                                      {assignment.reviewer.expertise && assignment.reviewer.expertise.length > 0
+                                        ? assignment.reviewer.expertise.join('、')
+                                        : 'AR、科學教育'}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="py-4 px-4 text-sm text-gray-600">
+                                  {new Date(assignment.createdAt).toLocaleDateString('zh-TW')}
+                                </td>
+                                <td className="py-4 px-4">
+                                  <span
+                                    className={`inline-block px-2 py-1 text-xs rounded ${
+                                      assignment.status === 'ACCEPTED'
+                                        ? 'bg-green-100 text-green-700'
+                                        : assignment.status === 'DECLINED'
+                                        ? 'bg-red-100 text-red-700'
+                                        : 'bg-gray-100 text-gray-700'
+                                    }`}
+                                  >
+                                    {assignment.status === 'ACCEPTED' ? '已接受' : 
+                                     assignment.status === 'DECLINED' ? '已拒絕' : '待回覆'}
+                                  </span>
+                                </td>
+                                <td className="py-4 px-4 text-sm text-gray-600">
+                                  {assignment.dueAt 
+                                    ? new Date(assignment.dueAt).toLocaleDateString('zh-TW')
+                                    : '-'}
+                                </td>
+                                <td className="py-4 px-4">
+                                  <span
+                                    className={`inline-block px-2 py-1 text-xs rounded ${
+                                      assignment.review?.submittedAt
+                                        ? 'bg-green-100 text-green-700'
+                                        : assignment.status === 'ACCEPTED'
+                                        ? 'bg-gray-100 text-gray-700'
+                                        : 'bg-gray-100 text-gray-700'
+                                    }`}
+                                  >
+                                    {assignment.review?.submittedAt ? '已提交' : 
+                                     assignment.status === 'ACCEPTED' ? '待完成' : '-'}
+                                  </span>
+                                </td>
+                                <td className="py-4 px-4 text-center">
+                                  <span className="text-gray-400">-</span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
 
                   {/* 審稿結果區塊 */}
@@ -508,7 +510,7 @@ ${submission?.abstract || ''}
                                 className="py-4 px-4 text-center text-gray-500"
                                 colSpan={5}
                               >
-                                -
+                                {loading ? '載入中...' : '尚未有審稿結果'}
                               </td>
                             </tr>
                           </tbody>
@@ -670,201 +672,6 @@ ${submission?.abstract || ''}
 
       <Footer />
 
-      {/* 指派審稿人模態視窗 */}
-      {showAssignModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-[1200px] max-h-[90vh] overflow-hidden shadow-2xl">
-            {/* 標題列 */}
-            <div className="px-6 py-4 flex items-center justify-between border-b border-gray-200">
-              <h3 className="text-xl font-medium text-gray-900">指派審稿人</h3>
-              <button
-                onClick={handleCloseAssignModal}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            </div>
-
-            {/* 內容區域 */}
-            <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
-              {error && (
-                <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-red-600 text-sm">{error}</p>
-                </div>
-              )}
-
-              {/* 審稿人列表表格 */}
-              <div className="mb-6">
-                {availableReviewers.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
-                    載入審稿人列表中...
-                  </div>
-                ) : (
-                  <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500 w-12">
-                            選擇
-                          </th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500 w-24">
-                            審稿人
-                          </th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500 w-48">
-                            服務單位與職稱
-                          </th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500 w-48">
-                            專業領域
-                          </th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500 w-20">
-                            歷史審稿次數
-                          </th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500 w-24">
-                            最近審稿日期
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {availableReviewers.map(reviewer => (
-                          <tr
-                            key={reviewer.id}
-                            className={`hover:bg-gray-50 ${
-                              !reviewer.isAvailable ? 'opacity-60' : ''
-                            }`}
-                          >
-                            <td className="px-4 py-4">
-                              <input
-                                type="checkbox"
-                                checked={selectedReviewers.includes(
-                                  reviewer.id
-                                )}
-                                onChange={() =>
-                                  reviewer.isAvailable &&
-                                  handleReviewerToggle(reviewer.id)
-                                }
-                                disabled={!reviewer.isAvailable}
-                                className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
-                              />
-                            </td>
-                            <td className="px-4 py-4 text-sm font-medium text-gray-900">
-                              {reviewer.displayName}
-                            </td>
-                            <td className="px-4 py-4 text-sm text-gray-600">
-                              暫無服務單位資料
-                            </td>
-                            <td className="px-4 py-4 text-sm text-gray-600">
-                              {reviewer.expertise.length > 0
-                                ? reviewer.expertise.slice(0, 2).join('、')
-                                : '暫無專業領域資料'}
-                            </td>
-                            <td className="px-4 py-4 text-sm text-gray-600 text-center">
-                              {reviewer.completedReviews}
-                            </td>
-                            <td className="px-4 py-4 text-sm text-gray-600">
-                              {reviewer.completedReviews > 0
-                                ? '暫無日期資料'
-                                : '無'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* 下半部：左右兩欄佈局 */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* 左側：審查邀請內容設定 */}
-                <div>
-                  <h4 className="text-lg font-medium text-gray-900 mb-4">
-                    審查邀請內容設定
-                  </h4>
-                  <div className="space-y-4">
-                    <textarea
-                      className="w-full h-48 px-4 py-3 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                      value={invitationContent}
-                      onChange={e => setInvitationContent(e.target.value)}
-                      placeholder="請輸入邀請內容..."
-                    />
-                  </div>
-                </div>
-
-                {/* 右側：日期設定和按鈕 */}
-                <div>
-                  <div className="space-y-6">
-                    {/* 回覆截止日 */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-900 mb-2">
-                        回覆截止日
-                      </label>
-                      <input
-                        type="date"
-                        value={reviewDueDate}
-                        onChange={e => setReviewDueDate(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                      />
-                    </div>
-
-                    {/* 審查截止日 */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-900 mb-2">
-                        審查截止日
-                      </label>
-                      <input
-                        type="date"
-                        value={(() => {
-                          if (!reviewDueDate) return ''
-                          const date = new Date(reviewDueDate)
-                          date.setDate(date.getDate() + 15)
-                          return date.toISOString().split('T')[0]
-                        })()}
-                        onChange={() => {}} // 自動計算，不需要手動修改
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50"
-                        readOnly
-                      />
-                    </div>
-
-                    {/* 發送按鈕 */}
-                    <div className="pt-4">
-                      <button
-                        onClick={handleAssignSubmit}
-                        disabled={
-                          selectedReviewers.length === 0 ||
-                          isAssigning ||
-                          !reviewDueDate
-                        }
-                        className="w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                      >
-                        {isAssigning ? (
-                          <>
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                            發送中...
-                          </>
-                        ) : (
-                          `發送指派信 (${selectedReviewers.length}位)`
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

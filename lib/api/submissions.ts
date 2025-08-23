@@ -102,14 +102,19 @@ export const submissionApi = {
     const params = new URLSearchParams()
     if (year) params.append('year', year.toString())
     if (status) params.append('status', status)
+    // 添加時間戳避免快取
+    params.append('_t', Date.now().toString())
     
     const response = await axios.get(`/api/submissions?${params.toString()}`)
+    
     return response.data
   },
 
   // 取得單一投稿詳情
   async getSubmission(id: string): Promise<{ submission: Submission }> {
-    const response = await axios.get(`/api/submissions/${id}`)
+    // 添加時間戳避免快取
+    const response = await axios.get(`/api/submissions/${id}?_t=${Date.now()}`)
+    
     return response.data
   },
 

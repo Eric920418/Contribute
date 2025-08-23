@@ -95,13 +95,17 @@ model Submission {
   submittedAt  DateTime?        // 提交時間
   
   // 新增欄位
-  paperType    String?          // 論文類型
+  paperType    String?          // 論文類型：研究論文、案例研究、工具論文等
   keywords     String?          @db.Text // 關鍵詞
   
   // 作者聲明
   agreementOriginalWork         Boolean? @default(false) // 原創作品聲明
   agreementNoConflictOfInterest Boolean? @default(false) // 無利益衝突聲明
   agreementConsentToPublish     Boolean? @default(false) // 發表同意書
+  
+  // 著作權確認與格式檢查
+  copyrightPermission           String?  // 著作權授權確認：yes/no
+  formatCheck                   String?  // 格式檢查確認：yes/no
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -292,7 +296,8 @@ enum SubmissionStatus {
 }
 
 enum FileAssetKind {
-  MANUSCRIPT
+  MANUSCRIPT_ANONYMOUS  // 匿名稿件
+  TITLE_PAGE           // 標題頁面（含作者資訊）
   COVER_LETTER
   FIGURE
   SUPPLEMENTARY

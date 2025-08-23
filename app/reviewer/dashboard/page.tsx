@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { FileText, Clock, CheckCircle, AlertCircle, Star, Calendar, Download, PenTool, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 import Header from '@/components/layout/Header'
 import Footer from '@/components/layout/Footer'
@@ -21,41 +22,7 @@ interface ReviewAssignment {
   suggestion?: 'accept_poster' | 'reject' | 'accept_oral'
 }
 
-const mockAssignments: ReviewAssignment[] = [
-  {
-    id: '1',
-    title: '基於深度學習的智慧教學系統設計與實現',
-    authors: ['張教授', '李博士', '王研究員'],
-    status: 'pending',
-    dueDate: '2025-09-15',
-    assignedDate: '2025-08-01',
-    priority: 'high',
-    paperType: '研究論文',
-  },
-  {
-    id: '2', 
-    title: '虛擬實境在課程設計中的應用研究',
-    authors: ['陳教授', '林博士'],
-    status: 'in_progress',
-    dueDate: '2025-09-20',
-    assignedDate: '2025-08-05',
-    submittedDate: '2025-08-10',
-    priority: 'medium',
-    paperType: '應用研究',
-  },
-  {
-    id: '3',
-    title: '人工智慧輔助語言學習平台效果評估',
-    authors: ['黃教授'],
-    status: 'completed',
-    dueDate: '2025-08-30',
-    assignedDate: '2025-07-20',
-    submittedDate: '2025-08-25',
-    priority: 'low',
-    paperType: '實驗研究',
-    suggestion: 'accept_oral',
-  }
-]
+// Mock 數據已移除，現在使用真實的資料庫數據
 
 const getStatusIcon = (status: string) => {
   switch (status) {
@@ -105,7 +72,8 @@ const getDaysRemaining = (dueDate: string): number => {
 }
 
 export default function ReviewerDashboard() {
-  const [assignments, setAssignments] = useState<ReviewAssignment[]>(mockAssignments)
+  const router = useRouter()
+  const [assignments, setAssignments] = useState<ReviewAssignment[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed'>('all')
@@ -124,24 +92,33 @@ export default function ReviewerDashboard() {
         // 檢查認證狀態
         if (!isAuthenticated) {
           await checkAuth()
+          return
         }
         
-        // 這裡之後可以替換為實際的 API 調用
-        // const response = await apiClient.get('/reviewer/assignments')
-        // setAssignments(response.data)
-        
-        // 暫時使用 mock 數據
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        setAssignments(mockAssignments)
+        // 調用真實的 API
+        try {
+          const response = await apiClient.get('/reviewer/assignments')
+          if (response.data.success) {
+            setAssignments(response.data.data)
+          } else {
+            throw new Error(response.data.error || '載入審稿資料失敗')
+          }
+        } catch (apiError: any) {
+          console.error('API 錯誤:', apiError)
+          // 如果 API 調用失敗，顯示錯誤但不回退到 mock 數據
+          throw apiError
+        }
       } catch (error: any) {
-        setError('載入審稿資料失敗')
+        setError(error.message || '載入審稿資料失敗')
         console.error('Error loading assignments:', error)
       } finally {
         setIsLoading(false)
       }
     }
 
-    loadData()
+    if (isAuthenticated) {
+      loadData()
+    }
   }, [isAuthenticated, checkAuth])
 
   const handleSort = (key: keyof ReviewAssignment) => {
@@ -188,20 +165,6 @@ export default function ReviewerDashboard() {
     completed: assignments.filter(a => a.status === 'completed').length
   }
 
-  const handleStartReview = (assignmentId: string) => {
-    // 開始審稿邏輯
-    console.log('開始審稿:', assignmentId)
-  }
-
-  const handleContinueReview = (assignmentId: string) => {
-    // 繼續審稿邏輯
-    console.log('繼續審稿:', assignmentId)
-  }
-
-  const handleViewReview = (assignmentId: string) => {
-    // 查看已完成審稿邏輯
-    console.log('查看審稿:', assignmentId)
-  }
 
   const handleDownloadPaper = (assignmentId: string) => {
     // 下載論文邏輯
@@ -213,7 +176,7 @@ export default function ReviewerDashboard() {
       <div className="min-h-screen flex flex-col bg-white">
         <Header currentPage="reviewer" />
         <main className="flex-1 p-[56px] bg-gray-100">
-          <div className="max-w-7xl mx-auto">
+          <div className="w-full md:max-w-7xl md:mx-auto">
             <div className="animate-pulse">
               <div className="h-8 bg-gray-200 rounded w-1/4 mb-8"></div>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -467,7 +430,8 @@ export default function ReviewerDashboard() {
                           (assignment, index) => (
                             <tr
                               key={assignment.id}
-                              className="hover:bg-gray-50"
+                              className="hover:bg-gray-50 cursor-pointer"
+                              onClick={() => router.push(`/reviewer/review/${assignment.id}`)}
                             >
                               {/* 編號 */}
                               <td className="px-4 py-[24px] align-middle text-gray-900 text-center text-20R">

@@ -96,7 +96,6 @@ export async function createUser(userData: CreateUserData): Promise<AuthResult> 
       }
     }
   } catch (error) {
-    console.error('創建使用者失敗:', error)
     return {
       success: false,
       error: '註冊失敗，請稍後再試'
@@ -144,7 +143,6 @@ export async function authenticateUser(credentials: LoginCredentials): Promise<A
       }
     }
   } catch (error) {
-    console.error('認證失敗:', error)
     return {
       success: false,
       error: '登入失敗，請稍後再試'
@@ -183,7 +181,6 @@ export async function createPasswordResetToken(email: string): Promise<string | 
 
     return token
   } catch (error) {
-    console.error('建立密碼重設令牌失敗:', error)
     return null
   }
 }
@@ -249,7 +246,6 @@ export async function resetPassword(token: string, newPassword: string): Promise
       }
     }
   } catch (error) {
-    console.error('重設密碼失敗:', error)
     return { success: false }
   }
 }
@@ -262,7 +258,7 @@ export async function verifyEmailToken(userId: string): Promise<boolean> {
     })
     return true
   } catch (error) {
-    console.error('Email 驗證失敗:', error)
+    
     return false
   }
 }

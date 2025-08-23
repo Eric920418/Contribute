@@ -4,11 +4,11 @@ services:
   # PostgreSQL 資料庫
   postgres:
     image: postgres:15-alpine
-    container_name: conference_postgres
+    container_name: conference_postgres_prod
     environment:
       POSTGRES_DB: conference_platform
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
     ports:
       - "5433:5432"
     volumes:
@@ -24,11 +24,11 @@ services:
   # MinIO 物件儲存 (S3 相容)
   minio:
     image: minio/minio:latest
-    container_name: conference_minio
+    container_name: conference_minio_prod
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -42,10 +42,10 @@ services:
       timeout: 20s
       retries: 3
 
-  # MailHog SMTP 測試伺服器
+  # MailHog SMTP 測試伺服器 (生產環境可替換為真實 SMTP)
   mailhog:
     image: mailhog/mailhog:latest
-    container_name: conference_mailhog
+    container_name: conference_mailhog_prod
     ports:
       - "1025:1025"  # SMTP port
       - "8025:8025"  # Web UI port
@@ -55,7 +55,7 @@ services:
   # Redis (用於 session 儲存和 cache)
   redis:
     image: redis:7-alpine
-    container_name: conference_redis
+    container_name: conference_redis_prod
     command: redis-server --appendonly yes
     ports:
       - "6379:6379"
@@ -72,7 +72,7 @@ services:
   # Nginx 反向代理
   nginx:
     image: nginx:alpine
-    container_name: conference_nginx
+    container_name: conference_nginx_prod
     ports:
       - "80:80"
       - "443:443"
@@ -85,31 +85,28 @@ services:
       - conference_network
     restart: unless-stopped
 
-  # Next.js 應用程式 (開發模式)
+  # Next.js 應用程式 (生產模式)
   web:
     build:
       context: .
-      dockerfile: apps/web/Dockerfile.dev
-    container_name: conference_web
+      dockerfile: Dockerfile
+    container_name: conference_web_prod
     environment:
-      - NODE_ENV=development
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/conference_platform?schema=public
-      - NEXTAUTH_URL=http://localhost:3000
-      - NEXTAUTH_SECRET=development-secret-key
-      - SMTP_HOST=mailhog
-      - SMTP_PORT=1025
-      - SMTP_FROM=noreply@conference-platform.local
-      - MINIO_ENDPOINT=minio
-      - MINIO_PORT=9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-      - REDIS_URL=redis://redis:6379
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-password}@postgres:5432/conference_platform?schema=public
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - SMTP_HOST=${SMTP_HOST:-mailhog}
+      - SMTP_PORT=${SMTP_PORT:-1025}
+      - SMTP_FROM=${SMTP_FROM:-noreply@conference-platform.local}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio}
+      - MINIO_PORT=${MINIO_PORT:-9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
     ports:
       - "3000:3000"
     volumes:
-      - ./apps/web:/app
-      - /app/node_modules
-      - /app/.next
       - uploads_data:/app/uploads
     depends_on:
       postgres:
@@ -123,14 +120,6 @@ services:
     networks:
       - conference_network
     restart: unless-stopped
-    command: >
-      sh -c "
-        pnpm install &&
-        pnpm db:generate &&
-        pnpm db:push &&
-        pnpm db:seed &&
-        pnpm dev
-      "
 
 volumes:
   postgres_data:

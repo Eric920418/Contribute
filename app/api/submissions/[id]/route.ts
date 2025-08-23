@@ -71,6 +71,8 @@ export async function PUT(
     const { id } = await params
 
     const body = await request.json()
+    console.log('收到更新資料:', JSON.stringify(body, null, 2))
+    
     const { 
       title, 
       abstract, 
@@ -80,7 +82,9 @@ export async function PUT(
       // 新增欄位
       paperType,
       keywords,
-      agreements
+      agreements,
+      copyrightPermission,
+      formatCheck
     } = body
 
     // 檢查投稿是否存在且屬於當前使用者
@@ -122,13 +126,16 @@ export async function PUT(
           agreementOriginalWork: agreements?.originalWork,
           agreementNoConflictOfInterest: agreements?.noConflictOfInterest,
           agreementConsentToPublish: agreements?.consentToPublish,
+          // 著作權確認與格式檢查
+          copyrightPermission: copyrightPermission || null,
+          formatCheck: formatCheck || null,
           authors: {
-            create: authors.map((author: any) => ({
-              name: author.name,
-              email: author.email,
-              affiliation: author.institution,
+            create: authors?.map((author: any) => ({
+              name: author.name || '',
+              email: author.email || '',
+              affiliation: author.institution || '',
               isCorresponding: author.isCorresponding || false
-            }))
+            })) || []
           }
         },
         include: {
@@ -142,9 +149,13 @@ export async function PUT(
       message: '投稿更新成功',
       submission: updatedSubmission
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error('更新投稿失敗:', error)
-    return NextResponse.json({ error: '伺服器錯誤' }, { status: 500 })
+    const errorMessage = error.message || '伺服器錯誤'
+    return NextResponse.json({ 
+      error: '更新投稿失敗: ' + errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    }, { status: 500 })
   }
 }
 

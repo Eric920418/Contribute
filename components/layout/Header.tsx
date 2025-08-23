@@ -23,11 +23,10 @@ export default function Header({ currentPage }: HeaderProps) {
       {/* 主要 Header */}
       <div className="w-full px-4 md:px-[56px] py-4 md:py-[32px] flex items-center justify-between">
         {/* 左側標題 */}
-        <div className="flex-shrink-0">
-          <h1 className="text-[#2581B4] text-lg md:text-[28px] font-medium leading-tight md:leading-[42px]">
-            <span className="block md:inline">國立臺北教育大學</span>
-            <br className="hidden md:block" />
-            <span className="block md:inline">課程與教學傳播科技研究所</span>
+        <div className="flex-shrink-0 max-w-[60%] md:max-w-none">
+          <h1 className="text-[#2581B4] text-sm md:text-[28px] font-medium leading-tight md:leading-[42px]">
+            <span className="block">國立臺北教育大學</span>
+            <span className="block">課程與教學傳播科技研究所</span>
           </h1>
         </div>
 
@@ -79,7 +78,7 @@ export default function Header({ currentPage }: HeaderProps) {
               <Link
                 key={index}
                 href={item.href}
-                className={`py-4 px-4 text-base font-medium border-b border-[#00182C26] last:border-b-0 transition-colors hover:bg-[#187DF8] ${
+                className={`py-4 px-6 text-base font-medium border-b border-[#00182C26] last:border-b-0 transition-colors hover:bg-accent ${
                   item.active ? 'bg-primary text-white' : 'text-foreground'
                 }`}
                 onClick={() => setIsMenuOpen(false)}

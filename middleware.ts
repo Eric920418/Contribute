@@ -37,7 +37,7 @@ async function verifyJWTToken(token: string): Promise<SessionData | null> {
     // 簡化版：暫時跳過signature驗證（在生產環境中需要實現）
     return payload
   } catch (error) {
-    console.error('JWT verification failed:', error)
+   
     return null
   }
 }
@@ -60,13 +60,13 @@ export async function middleware(request: NextRequest) {
   
   // 獲取session cookie
   const sessionToken = request.cookies.get('session')?.value
-  console.log('Middleware: sessionToken exists:', !!sessionToken)
+ 
   
   // 驗證session
   let session = null
   if (sessionToken) {
     session = await verifyJWTToken(sessionToken)
-    console.log('Middleware: session verified:', !!session)
+    
   }
 
   // 檢查是否為受保護的路由

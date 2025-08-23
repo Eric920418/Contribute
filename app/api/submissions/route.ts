@@ -39,9 +39,12 @@ export async function GET(request: NextRequest) {
       include: {
         authors: true,
         files: {
-          where: { kind: 'MANUSCRIPT' },
-          orderBy: { version: 'desc' },
-          take: 1
+          where: { 
+            kind: { 
+              in: ['MANUSCRIPT_ANONYMOUS', 'TITLE_PAGE'] 
+            } 
+          },
+          orderBy: { version: 'desc' }
         },
         decisions: {
           orderBy: { decidedAt: 'desc' },
@@ -103,6 +106,8 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
+    console.log('收到創建資料:', JSON.stringify(body, null, 2))
+    
     const {
       title,
       abstract,
@@ -113,23 +118,29 @@ export async function POST(request: NextRequest) {
       // 新增欄位
       paperType,
       keywords,
-      agreements
+      agreements,
+      copyrightPermission,
+      formatCheck
     } = body
 
-    // 驗證必填欄位
-    if (!title || !abstract || !track) {
-      return NextResponse.json({ error: '缺少必填欄位' }, { status: 400 })
-    }
+    // 根據狀態決定驗證嚴格程度
+    if (status === 'SUBMITTED') {
+      // 正式提交需要檢查所有必填欄位
+      if (!title || !abstract || !track) {
+        return NextResponse.json({ error: '缺少必填欄位' }, { status: 400 })
+      }
 
-    if (!authors || authors.length === 0) {
-      return NextResponse.json({ error: '至少需要一位作者' }, { status: 400 })
-    }
+      if (!authors || authors.length === 0) {
+        return NextResponse.json({ error: '至少需要一位作者' }, { status: 400 })
+      }
 
-    // 檢查是否有通訊作者
-    const hasCorrespondingAuthor = authors.some((author: any) => author.isCorresponding)
-    if (!hasCorrespondingAuthor) {
-      return NextResponse.json({ error: '必須指定一位通訊作者' }, { status: 400 })
+      // 檢查是否有通訊作者
+      const hasCorrespondingAuthor = authors.some((author: any) => author.isCorresponding)
+      if (!hasCorrespondingAuthor) {
+        return NextResponse.json({ error: '必須指定一位通訊作者' }, { status: 400 })
+      }
     }
+    // 草稿狀態允許部分填寫
 
     // 取得會議資料
     const conference = await prisma.conference.findFirst({
@@ -156,11 +167,14 @@ export async function POST(request: NextRequest) {
         agreementOriginalWork: agreements?.originalWork || false,
         agreementNoConflictOfInterest: agreements?.noConflictOfInterest || false,
         agreementConsentToPublish: agreements?.consentToPublish || false,
+        // 著作權確認與格式檢查
+        copyrightPermission: copyrightPermission || null,
+        formatCheck: formatCheck || null,
         authors: {
-          create: authors.map((author: any) => ({
-            name: author.name,
-            email: author.email,
-            affiliation: author.institution,
+          create: (authors || []).map((author: any) => ({
+            name: author.name || '',
+            email: author.email || '',
+            affiliation: author.institution || '',
             isCorresponding: author.isCorresponding || false
           }))
         }
@@ -175,8 +189,12 @@ export async function POST(request: NextRequest) {
       message: status === 'DRAFT' ? '草稿保存成功' : '投稿提交成功',
       submission
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error('建立投稿失敗:', error)
-    return NextResponse.json({ error: '伺服器錯誤' }, { status: 500 })
+    const errorMessage = error.message || '伺服器錯誤'
+    return NextResponse.json({ 
+      error: '建立投稿失敗: ' + errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    }, { status: 500 })
   }
 }

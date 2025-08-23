@@ -43,29 +43,78 @@ export default function AuthorPage() {
     error: mutationError,
   } = useSubmissionMutations()
   const [currentStep, setCurrentStep] = useState(1)
-  const [submissionData, setSubmissionData] = useState({
+  // 定義作者類型
+  interface Author {
+    name: string
+    institution: string
+    email: string
+    isCorresponding: boolean
+  }
+
+  const [submissionData, setSubmissionData] = useState<{
+    paperType: string
+    conferenceSubject: string
+    title: string
+    abstract: string
+    keywords: string
+    manuscriptFile: File | null
+    titlePageFile: File | null
+    authors: Author[]
+    agreements: {
+      originalWork: boolean
+      noConflictOfInterest: boolean
+      consentToPublish: boolean
+    }
+    copyrightPermission: string
+    formatCheck: string
+  }>({
     paperType: '',
     conferenceSubject: '',
     title: '',
     abstract: '',
     keywords: '',
-    file: null as File | null,
-    authors: [
-      {
-        name: '',
-        institution: '',
-        email: '',
-        isCorresponding: true,
-      },
-    ],
+    manuscriptFile: null,
+    titlePageFile: null,
+    authors: [],
     agreements: {
       originalWork: false,
       noConflictOfInterest: false,
       consentToPublish: false,
     },
+    copyrightPermission: '',
+    formatCheck: '',
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isEditingDraft, setIsEditingDraft] = useState(false)
+  
+  // 檔案上傳狀態
+  const [uploadingFiles, setUploadingFiles] = useState(false)
+  const [uploadedFiles, setUploadedFiles] = useState<{
+    manuscriptFile?: {
+      id: string;
+      originalName: string;
+      size: number;
+      version: number;
+    };
+    titlePageFile?: {
+      id: string;
+      originalName: string;
+      size: number;
+      version: number;
+    };
+  }>({})
+  const [currentSubmissionId, setCurrentSubmissionId] = useState<string | null>(null)
+  
+  // 作者模態視窗狀態
+  const [showAuthorModal, setShowAuthorModal] = useState(false)
+  const [modalMode, setModalMode] = useState<'add' | 'edit'>('add')
+  const [editingAuthorIndex, setEditingAuthorIndex] = useState<number | null>(null)
+  const [modalAuthorData, setModalAuthorData] = useState({
+    name: '',
+    institution: '',
+    email: '',
+    isCorresponding: false,
+  })
 
   // 頁面載入時自動載入草稿
   useEffect(() => {
@@ -85,44 +134,38 @@ export default function AuthorPage() {
           abstract: draftData.abstract || '',
           keywords: draftData.keywords || '',
           // 注意：檔案無法從 localStorage 恢復，只能顯示檔案資訊
-          file: null, // File 物件無法保存到 localStorage
+          manuscriptFile: null, // File 物件無法保存到 localStorage
+          titlePageFile: null,
           authors:
             draftData.authors && draftData.authors.length > 0
               ? draftData.authors
-              : [
-                  {
-                    name: '',
-                    institution: '',
-                    email: '',
-                    isCorresponding: true,
-                  },
-                ],
+              : [],
           agreements: draftData.agreements || {
             originalWork: false,
             noConflictOfInterest: false,
             consentToPublish: false,
           },
+          copyrightPermission: draftData.copyrightPermission || '',
+          formatCheck: draftData.formatCheck || '',
         })
         // 新建稿件時不載入步驟狀態，維持從步驟1開始
         // setCurrentStep(draftData.currentStep || 1)
 
-        // 如果有檔案資訊，顯示提示
-        if (draftData.fileInfo) {
-          console.log(
-            '草稿已載入，但檔案需要重新上傳：',
-            draftData.fileInfo.name
-          )
-        }
+      
 
-        // 如果有草稿ID，記錄下來（用於後續更新）
+        // IMPORTANT: 初始載入時清空檔案狀態，避免顯示不存在的檔案
+        setUploadedFiles({})
+
+        // 如果有草稿ID，設定為當前 submission ID（用於後續更新和檔案關聯）
         if (draftData.draftId) {
-          console.log('載入現有草稿ID：', draftData.draftId)
+         
+          setCurrentSubmissionId(draftData.draftId)
         }
 
-        console.log('草稿已載入：', draftData)
+       
       }
     } catch (error) {
-      console.error('載入草稿失敗：', error)
+     
     }
   }
 
@@ -136,7 +179,7 @@ export default function AuthorPage() {
         submissionData.keywords.trim() ||
         submissionData.paperType ||
         submissionData.conferenceSubject ||
-        submissionData.file ||
+        submissionData.manuscriptFile ||
         submissionData.authors.some(
           author =>
             author.name.trim() ||
@@ -161,9 +204,9 @@ export default function AuthorPage() {
 
         try {
           await saveSubmissionDraft(draftData)
-          console.log('當前內容已自動保存為草稿')
+         
         } catch (err) {
-          console.error('自動保存草稿失敗:', err)
+         
         }
       }
 
@@ -174,7 +217,8 @@ export default function AuthorPage() {
         title: '',
         abstract: '',
         keywords: '',
-        file: null,
+        manuscriptFile: null,
+        titlePageFile: null,
         authors: [
           {
             name: '',
@@ -188,6 +232,8 @@ export default function AuthorPage() {
           noConflictOfInterest: false,
           consentToPublish: false,
         },
+        copyrightPermission: '',
+        formatCheck: '',
       })
       setCurrentStep(1)
       setErrors({})
@@ -199,9 +245,9 @@ export default function AuthorPage() {
       // 切換到投稿表單
       setActiveTab('submission')
 
-      console.log('新投稿已開始，表單已清空')
+     
     } catch (error) {
-      console.error('開始新投稿失敗：', error)
+     
     }
   }
 
@@ -243,7 +289,14 @@ export default function AuthorPage() {
           checkErrors.keywords = '請輸入關鍵詞'
         break
       case 3:
-        if (!submissionData.file) checkErrors.file = '請上傳稿件'
+        // 檢查匿名稿件：本地檔案或已上傳檔案
+        if (!submissionData.manuscriptFile && !uploadedFiles.manuscriptFile) {
+          checkErrors.manuscriptFile = '請上傳匿名稿件'
+        }
+        // 檢查標題頁面：本地檔案或已上傳檔案
+        if (!submissionData.titlePageFile && !uploadedFiles.titlePageFile) {
+          checkErrors.titlePageFile = '請上傳標題頁面'
+        }
         break
       case 4:
         submissionData.authors.forEach((author, index) => {
@@ -287,7 +340,14 @@ export default function AuthorPage() {
         if (!submissionData.keywords.trim()) newErrors.keywords = '請輸入關鍵詞'
         break
       case 3:
-        if (!submissionData.file) newErrors.file = '請上傳稿件'
+        // 檢查匿名稿件：本地檔案或已上傳檔案
+        if (!submissionData.manuscriptFile && !uploadedFiles.manuscriptFile) {
+          newErrors.manuscriptFile = '請上傳匿名稿件'
+        }
+        // 檢查標題頁面：本地檔案或已上傳檔案  
+        if (!submissionData.titlePageFile && !uploadedFiles.titlePageFile) {
+          newErrors.titlePageFile = '請上傳標題頁面'
+        }
         break
       case 4:
         submissionData.authors.forEach((author, index) => {
@@ -306,9 +366,13 @@ export default function AuthorPage() {
         if (!submissionData.agreements.originalWork)
           newErrors.originalWork = '必須確認此為原創作品'
         if (!submissionData.agreements.noConflictOfInterest)
-          newErrors.noConflictOfInterest = '必須聲明無利益衝突'
+          newErrors.noConflictOfInterest = '必須確認研究倫理遵循'
         if (!submissionData.agreements.consentToPublish)
-          newErrors.consentToPublish = '必須同意發表條款'
+          newErrors.consentToPublish = '必須確認已準備匿名稿件'
+        if (!submissionData.copyrightPermission)
+          newErrors.copyrightPermission = '請選擇是否已取得著作權授權'
+        if (!submissionData.formatCheck)
+          newErrors.formatCheck = '請確認是否已檢查格式'
         break
     }
 
@@ -355,26 +419,212 @@ export default function AuthorPage() {
     }
   }
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleManuscriptFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
-      setSubmissionData(prev => ({ ...prev, file }))
+      setSubmissionData(prev => ({ ...prev, manuscriptFile: file }))
+    }
+  }
+
+  const handleTitlePageFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      setSubmissionData(prev => ({ ...prev, titlePageFile: file }))
+    }
+  }
+
+  // 檔案下載函數
+  const downloadFile = async (fileId: string, originalName: string) => {
+    try {
+     
+      const response = await fetch(`/api/submissions/download?fileId=${fileId}`)
+      
+     
+      
+      if (!response.ok) {
+        let errorData
+        try {
+          errorData = await response.json()
+        } catch (e) {
+          errorData = { error: `HTTP ${response.status}: ${response.statusText}` }
+        }
+       
+        throw new Error(errorData.error || `檔案下載失敗 (${response.status})`)
+      }
+
+      // 創建下載連結
+      const blob = await response.blob()
+     
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = originalName
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      
+      const errorMessage = error instanceof Error ? error.message : '未知錯誤'
+      alert(`檔案下載失敗: ${errorMessage}`)
+    }
+  }
+
+  // 檔案上傳函數
+  const uploadFiles = async () => {
+    // 檢查是否有需要上傳的檔案
+    const hasManuscriptToUpload = submissionData.manuscriptFile && !uploadedFiles.manuscriptFile
+    const hasTitlePageToUpload = submissionData.titlePageFile && !uploadedFiles.titlePageFile
+    
+    if (!hasManuscriptToUpload && !hasTitlePageToUpload) {
+      setErrors(prev => ({ ...prev, upload: '請選擇要上傳的檔案' }))
+      return
+    }
+
+    setUploadingFiles(true)
+    setErrors(prev => ({ ...prev, upload: '' }))
+
+    try {
+      // 如果沒有投稿ID，先創建草稿
+      let submissionId = currentSubmissionId
+      if (!submissionId) {
+        const draftResponse = await fetch('/api/submissions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title: submissionData.title || '未命名稿件',
+            abstract: submissionData.abstract || '',
+            track: submissionData.conferenceSubject || '',
+            paperType: submissionData.paperType || '',
+            keywords: submissionData.keywords || '',
+            authors: submissionData.authors.filter(author => author.name.trim()),
+            status: 'DRAFT'
+          }),
+        })
+
+        if (!draftResponse.ok) {
+          throw new Error('創建草稿失敗')
+        }
+
+        const draftData = await draftResponse.json()
+        submissionId = draftData.submission.id
+        setCurrentSubmissionId(submissionId)
+      }
+
+      const uploadResults: any = {}
+
+      // 只上傳匿名稿件（如果選擇了且尚未上傳）
+      if (hasManuscriptToUpload) {
+        const manuscriptFormData = new FormData()
+        manuscriptFormData.append('submissionId', submissionId || '')
+        manuscriptFormData.append('fileType', 'MANUSCRIPT_ANONYMOUS')
+        manuscriptFormData.append('file', submissionData.manuscriptFile!)
+
+        const manuscriptResponse = await fetch('/api/submissions/upload', {
+          method: 'POST',
+          body: manuscriptFormData,
+        })
+
+        if (!manuscriptResponse.ok) {
+          const errorData = await manuscriptResponse.json()
+          throw new Error(errorData.error || '匿名稿件上傳失敗')
+        }
+
+        const manuscriptData = await manuscriptResponse.json()
+        uploadResults.manuscriptFile = manuscriptData.file
+      }
+
+      // 只上傳標題頁面（如果選擇了且尚未上傳）
+      if (hasTitlePageToUpload) {
+        const titlePageFormData = new FormData()
+        titlePageFormData.append('submissionId', submissionId || '')
+        titlePageFormData.append('fileType', 'TITLE_PAGE')
+        titlePageFormData.append('file', submissionData.titlePageFile!)
+
+        const titlePageResponse = await fetch('/api/submissions/upload', {
+          method: 'POST',
+          body: titlePageFormData,
+        })
+
+        if (!titlePageResponse.ok) {
+          const errorData = await titlePageResponse.json()
+          throw new Error(errorData.error || '標題頁面上傳失敗')
+        }
+
+        const titlePageData = await titlePageResponse.json()
+        uploadResults.titlePageFile = titlePageData.file
+      }
+
+      // 更新已上傳檔案狀態（保留現有的，加入新上傳的）
+      setUploadedFiles(prev => ({
+        ...prev,
+        ...uploadResults
+      }))
+
+      // 清除已上傳檔案的選擇狀態
+      setSubmissionData(prev => ({
+        ...prev,
+        manuscriptFile: hasManuscriptToUpload ? null : prev.manuscriptFile,
+        titlePageFile: hasTitlePageToUpload ? null : prev.titlePageFile
+      }))
+
+      // 立即更新 localStorage，包含新上傳的檔案資訊
+      const updatedUploadedFiles = { ...uploadedFiles, ...uploadResults }
+      const currentData = { ...submissionData }
+      const updatedData = {
+        ...currentData,
+        manuscriptFile: hasManuscriptToUpload ? null : currentData.manuscriptFile,
+        titlePageFile: hasTitlePageToUpload ? null : currentData.titlePageFile,
+        // 更新檔案資訊，優先使用已上傳的檔案
+        manuscriptFileInfo: updatedUploadedFiles.manuscriptFile
+          ? {
+              name: updatedUploadedFiles.manuscriptFile.originalName,
+              size: updatedUploadedFiles.manuscriptFile.size,
+              type: 'application/pdf',
+              lastModified: Date.now(),
+            }
+          : currentData.manuscriptFileInfo,
+        titlePageFileInfo: updatedUploadedFiles.titlePageFile
+          ? {
+              name: updatedUploadedFiles.titlePageFile.originalName,
+              size: updatedUploadedFiles.titlePageFile.size,
+              type: 'application/pdf',
+              lastModified: Date.now(),
+            }
+          : currentData.titlePageFileInfo,
+        draftId: submissionId
+      }
+      
+      localStorage.setItem('submissionDraft', JSON.stringify(updatedData))
+     
+
+      setErrors(prev => ({ ...prev, upload: '' }))
+      const uploadCount = Object.keys(uploadResults).length
+      alert(`成功上傳 ${uploadCount} 個檔案！`)
+      
+    } catch (error) {
+     
+      setErrors(prev => ({ 
+        ...prev, 
+        upload: error instanceof Error ? error.message : '檔案上傳失敗' 
+      }))
+    } finally {
+      setUploadingFiles(false)
     }
   }
 
   const addAuthor = () => {
-    setSubmissionData(prev => ({
-      ...prev,
-      authors: [
-        ...prev.authors,
-        {
-          name: '',
-          institution: '',
-          email: '',
-          isCorresponding: false,
-        },
-      ],
-    }))
+    setModalMode('add')
+    setEditingAuthorIndex(null)
+    setModalAuthorData({
+      name: '',
+      institution: '',
+      email: '',
+      isCorresponding: false,
+    })
+    setShowAuthorModal(true)
   }
 
   const removeAuthor = (index: number) => {
@@ -398,99 +648,257 @@ export default function AuthorPage() {
       ),
     }))
   }
+  
+  const setCorresponding = (index: number) => {
+    setSubmissionData(prev => ({
+      ...prev,
+      authors: prev.authors.map((author, i) => ({
+        ...author,
+        isCorresponding: i === index,
+      })),
+    }))
+  }
+  
+  const editAuthor = (index: number) => {
+    const author = submissionData.authors[index]
+    setModalMode('edit')
+    setEditingAuthorIndex(index)
+    setModalAuthorData({
+      name: author.name,
+      institution: author.institution,
+      email: author.email,
+      isCorresponding: author.isCorresponding,
+    })
+    setShowAuthorModal(true)
+  }
+  
+  const moveAuthor = (index: number, direction: number) => {
+    const newIndex = index + direction
+    if (newIndex < 0 || newIndex >= submissionData.authors.length) return
+    
+    setSubmissionData(prev => {
+      const newAuthors = [...prev.authors]
+      const [movedAuthor] = newAuthors.splice(index, 1)
+      newAuthors.splice(newIndex, 0, movedAuthor)
+      return {
+        ...prev,
+        authors: newAuthors,
+      }
+    })
+  }
+  
+  // 處理模態視窗的函數
+  const handleModalSave = () => {
+    // 驗證必填欄位
+    if (!modalAuthorData.name.trim()) {
+      alert('請輸入作者姓名')
+      return
+    }
+    if (!modalAuthorData.institution.trim()) {
+      alert('請輸入服務機構')
+      return
+    }
+    if (!modalAuthorData.email.trim()) {
+      alert('請輸入電子郵件')
+      return
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(modalAuthorData.email)) {
+      alert('請輸入有效的電子郵件')
+      return
+    }
+
+    if (modalMode === 'add') {
+      // 新增作者
+      setSubmissionData(prev => ({
+        ...prev,
+        authors: [
+          ...prev.authors,
+          { ...modalAuthorData },
+        ],
+      }))
+    } else if (modalMode === 'edit' && editingAuthorIndex !== null) {
+      // 編輯作者
+      setSubmissionData(prev => ({
+        ...prev,
+        authors: prev.authors.map((author, i) =>
+          i === editingAuthorIndex ? { ...modalAuthorData } : author
+        ),
+      }))
+    }
+
+    // 關閉模態視窗
+    setShowAuthorModal(false)
+    setModalAuthorData({
+      name: '',
+      institution: '',
+      email: '',
+      isCorresponding: false,
+    })
+    setEditingAuthorIndex(null)
+  }
+
+  const handleModalCancel = () => {
+    setShowAuthorModal(false)
+    setModalAuthorData({
+      name: '',
+      institution: '',
+      email: '',
+      isCorresponding: false,
+    })
+    setEditingAuthorIndex(null)
+  }
 
   const saveDraft = async () => {
     try {
-      // 驗證當前步驟
-      if (!validateStep(currentStep)) {
-        alert('請完成當前步驟的必填欄位')
-        return
-      }
+      // 草稿可以隨時保存，不需要驗證當前步驟
 
-      // 檢查是否有現有草稿（基於 localStorage 保存的 draftId）
-      let existingDraft = null
-      try {
-        const savedDraft = localStorage.getItem('submissionDraft')
-        if (savedDraft) {
-          const draftData = JSON.parse(savedDraft)
-          if (draftData.draftId) {
-            existingDraft = submissions.find(
-              s => s.id === draftData.draftId && s.status === 'DRAFT'
-            )
-          }
-        }
-      } catch (e) {
-        // 忽略解析錯誤
-      }
-
-      // 如果沒有找到對應的草稿ID，則嘗試根據內容匹配
-      if (!existingDraft) {
-        existingDraft = submissions.find(
-          s =>
-            s.status === 'DRAFT' &&
-            s.title === submissionData.title &&
-            s.abstract === submissionData.abstract
+      // 檢查是否有現有草稿
+      let existingDraftId = null
+      
+      // 優先使用當前的 submission ID（檔案上傳時建立的）
+      if (currentSubmissionId) {
+        const currentSubmission = submissions.find(
+          s => s.id === currentSubmissionId && s.status === 'DRAFT'
         )
+        if (currentSubmission) {
+          existingDraftId = currentSubmissionId
+        }
+      }
+      
+      // 如果沒有 currentSubmissionId，從 localStorage 找草稿ID
+      if (!existingDraftId) {
+        try {
+          const savedDraft = localStorage.getItem('submissionDraft')
+          if (savedDraft) {
+            const draftData = JSON.parse(savedDraft)
+            if (draftData.draftId) {
+              const existingDraft = submissions.find(
+                s => s.id === draftData.draftId && s.status === 'DRAFT'
+              )
+              if (existingDraft) {
+                existingDraftId = draftData.draftId
+              }
+            }
+          }
+        } catch (e) {
+          // 忽略解析錯誤
+        }
       }
 
       // 完整的草稿資料，包含所有欄位
       const draftData = {
-        title: submissionData.title,
-        abstract: submissionData.abstract,
-        track: submissionData.conferenceSubject,
-        authors: submissionData.authors.map(author => ({
-          name: author.name,
-          email: author.email,
-          institution: author.institution,
-          isCorresponding: author.isCorresponding,
+        title: submissionData.title || '',
+        abstract: submissionData.abstract || '',
+        track: submissionData.conferenceSubject || '',
+        authors: submissionData.authors.filter(author => author.name.trim()).map(author => ({
+          name: author.name.trim(),
+          email: author.email.trim(),
+          institution: author.institution.trim(),
+          isCorresponding: author.isCorresponding || false,
         })),
         conferenceYear: year,
         // 新增完整欄位
-        paperType: submissionData.paperType,
-        keywords: submissionData.keywords,
-        fileInfo: submissionData.file
+        paperType: submissionData.paperType || '',
+        keywords: submissionData.keywords || '',
+        manuscriptFileInfo: submissionData.manuscriptFile
           ? {
-              name: submissionData.file.name,
-              size: submissionData.file.size,
-              type: submissionData.file.type,
-              lastModified: submissionData.file.lastModified,
+              name: submissionData.manuscriptFile.name,
+              size: submissionData.manuscriptFile.size,
+              type: submissionData.manuscriptFile.type,
+              lastModified: submissionData.manuscriptFile.lastModified,
+            }
+          : uploadedFiles.manuscriptFile
+          ? {
+              name: uploadedFiles.manuscriptFile.originalName,
+              size: uploadedFiles.manuscriptFile.size,
+              type: 'application/pdf', // 上傳的檔案已轉為PDF
+              lastModified: Date.now(),
             }
           : null,
-        agreements: submissionData.agreements,
+        titlePageFileInfo: submissionData.titlePageFile
+          ? {
+              name: submissionData.titlePageFile.name,
+              size: submissionData.titlePageFile.size,
+              type: submissionData.titlePageFile.type,
+              lastModified: submissionData.titlePageFile.lastModified,
+            }
+          : uploadedFiles.titlePageFile
+          ? {
+              name: uploadedFiles.titlePageFile.originalName,
+              size: uploadedFiles.titlePageFile.size,
+              type: 'application/pdf', // 上傳的檔案已轉為PDF
+              lastModified: Date.now(),
+            }
+          : null,
+        agreements: submissionData.agreements || {
+          originalWork: false,
+          noConflictOfInterest: false,
+          consentToPublish: false,
+        },
+        copyrightPermission: submissionData.copyrightPermission || '',
+        formatCheck: submissionData.formatCheck || '',
         // 如果有現有草稿，傳送其ID以更新而不是創建新的
-        draftId: existingDraft?.id,
+        draftId: existingDraftId,
       }
 
-      await saveSubmissionDraft(draftData)
+      const result = await saveSubmissionDraft(draftData)
 
-      // 保存到本地存儲（備份）
+      // 保存到本地存儲（備份），使用返回的草稿ID
+      const savedDraftId = result.submission.id
+      
+      // 更新當前的 submission ID，確保檔案和草稿關聯
+      setCurrentSubmissionId(savedDraftId)
       const localDraftData = {
         paperType: submissionData.paperType,
         conferenceSubject: submissionData.conferenceSubject,
         title: submissionData.title,
         abstract: submissionData.abstract,
         keywords: submissionData.keywords,
-        fileInfo: submissionData.file
+        manuscriptFileInfo: submissionData.manuscriptFile
           ? {
-              name: submissionData.file.name,
-              size: submissionData.file.size,
-              type: submissionData.file.type,
-              lastModified: submissionData.file.lastModified,
+              name: submissionData.manuscriptFile.name,
+              size: submissionData.manuscriptFile.size,
+              type: submissionData.manuscriptFile.type,
+              lastModified: submissionData.manuscriptFile.lastModified,
+            }
+          : uploadedFiles.manuscriptFile
+          ? {
+              name: uploadedFiles.manuscriptFile.originalName,
+              size: uploadedFiles.manuscriptFile.size,
+              type: 'application/pdf', // 上傳的檔案已轉為PDF
+              lastModified: Date.now(),
+            }
+          : null,
+        titlePageFileInfo: submissionData.titlePageFile
+          ? {
+              name: submissionData.titlePageFile.name,
+              size: submissionData.titlePageFile.size,
+              type: submissionData.titlePageFile.type,
+              lastModified: submissionData.titlePageFile.lastModified,
+            }
+          : uploadedFiles.titlePageFile
+          ? {
+              name: uploadedFiles.titlePageFile.originalName,
+              size: uploadedFiles.titlePageFile.size,
+              type: 'application/pdf', // 上傳的檔案已轉為PDF
+              lastModified: Date.now(),
             }
           : null,
         authors: submissionData.authors,
         agreements: submissionData.agreements,
+        copyrightPermission: submissionData.copyrightPermission,
+        formatCheck: submissionData.formatCheck,
         currentStep,
         lastSaved: new Date().toISOString(),
-        draftId: existingDraft?.id, // 保存草稿ID
+        draftId: savedDraftId, // 使用實際保存的草稿ID
       }
       localStorage.setItem('submissionDraft', JSON.stringify(localDraftData))
 
       alert('草稿已保存成功！')
       refetch() // 重新載入資料
     } catch (err: any) {
-      console.error('保存草稿失敗:', err)
-      alert('保存草稿失敗: ' + err.message)
+      const errorMessage = err.response?.data?.error || err.message || '保存草稿失敗'
+      alert('保存草稿失敗: ' + errorMessage)
     }
   }
 
@@ -504,14 +912,29 @@ export default function AuthorPage() {
         return
       }
 
-      // 查找對應的草稿
-      const existingDraft = submissions.find(
-        s =>
-          s.status === 'DRAFT' &&
-          s.title === submissionData.title &&
-          s.abstract === submissionData.abstract &&
-          s.track === submissionData.conferenceSubject
-      )
+      // 優先使用當前的 submission ID，否則查找對應的草稿
+      let existingDraftId = null
+      
+      if (currentSubmissionId) {
+        const currentSubmission = submissions.find(
+          s => s.id === currentSubmissionId && s.status === 'DRAFT'
+        )
+        if (currentSubmission) {
+          existingDraftId = currentSubmissionId
+        }
+      }
+      
+      // 如果沒有 currentSubmissionId，嘗試查找對應的草稿
+      if (!existingDraftId) {
+        const existingDraft = submissions.find(
+          s =>
+            s.status === 'DRAFT' &&
+            s.title === submissionData.title &&
+            s.abstract === submissionData.abstract &&
+            s.track === submissionData.conferenceSubject
+        )
+        existingDraftId = existingDraft?.id
+      }
 
       const submissionPayload = {
         title: submissionData.title,
@@ -524,7 +947,7 @@ export default function AuthorPage() {
           isCorresponding: author.isCorresponding,
         })),
         conferenceYear: year,
-        draftId: existingDraft?.id, // 如果找到對應草稿，使用其ID
+        draftId: existingDraftId, // 如果找到對應草稿，使用其ID
       }
 
       const result = await submitSubmission(submissionPayload)
@@ -546,13 +969,15 @@ export default function AuthorPage() {
       // 重置表單
       setActiveTab('home')
       setCurrentStep(1)
+      setCurrentSubmissionId(null) // 清除當前 submission ID
       setSubmissionData({
         paperType: '',
         conferenceSubject: '',
         title: '',
         abstract: '',
         keywords: '',
-        file: null,
+        manuscriptFile: null,
+        titlePageFile: null,
         authors: [
           {
             name: '',
@@ -566,13 +991,14 @@ export default function AuthorPage() {
           noConflictOfInterest: false,
           consentToPublish: false,
         },
+        copyrightPermission: '',
+        formatCheck: '',
       })
       setErrors({})
 
       // 重新載入資料
       refetch()
     } catch (err: any) {
-      console.error('提交稿件失敗:', err)
       alert('提交稿件失敗: ' + err.message)
     }
   }
@@ -589,8 +1015,20 @@ export default function AuthorPage() {
     }))
 
   // 載入草稿到編輯表單
-  const loadDraftForEdit = (submission: any) => {
+  const loadDraftForEdit = async (submission: any) => {
     try {
+      // 重新獲取最新的submission資料，包含最新的檔案狀態
+      let latestSubmission = submission
+      try {
+        const response = await fetch(`/api/submissions/${submission.id}`)
+        if (response.ok) {
+          const data = await response.json()
+          latestSubmission = data.submission
+        } else {
+        }
+      } catch (error) {
+      }
+
       // 首先嘗試從 localStorage 載入完整資料（如果有的話）
       let fullData = null
       try {
@@ -599,64 +1037,120 @@ export default function AuthorPage() {
           const draftData = JSON.parse(savedDraft)
           // 檢查是否是同一份草稿
           if (
-            draftData.title === submission.title &&
-            draftData.abstract === submission.abstract
+            draftData.title === latestSubmission.title &&
+            draftData.abstract === latestSubmission.abstract
           ) {
             fullData = draftData
           }
         }
       } catch (e) {
-        console.warn('無法從 localStorage 載入草稿資料')
+        console.warn('無法從 localStorage 載入草稿資料')  // TODO: 需要處理
       }
 
       // 將草稿資料載入到表單狀態
       setSubmissionData({
-        paperType: fullData?.paperType || submission.paperType || '',
-        conferenceSubject: submission.track || '',
-        title: submission.title || '',
-        abstract: submission.abstract || '',
-        keywords: fullData?.keywords || submission.keywords || '',
-        file: null, // 檔案需要特別處理，無法從後端恢復
+        paperType: fullData?.paperType || latestSubmission.paperType || '',
+        conferenceSubject: latestSubmission.track || '',
+        title: latestSubmission.title || '',
+        abstract: latestSubmission.abstract || '',
+        keywords: fullData?.keywords || latestSubmission.keywords || '',
+        manuscriptFile: null, // 檔案需要特別處理，無法從後端恢復
+        titlePageFile: null,
         authors:
-          submission.authors?.length > 0
-            ? submission.authors.map((author: any) => ({
+          latestSubmission.authors?.length > 0
+            ? latestSubmission.authors.map((author: any) => ({
                 name: author.name || '',
                 institution: author.affiliation || author.institution || '',
                 email: author.email || '',
                 isCorresponding: author.isCorresponding || false,
               }))
-            : [
-                {
-                  name: '',
-                  institution: '',
-                  email: '',
-                  isCorresponding: true,
-                },
-              ],
+            : [],
         agreements: fullData?.agreements || {
           originalWork: false,
           noConflictOfInterest: false,
           consentToPublish: false,
         },
+        copyrightPermission: fullData?.copyrightPermission || '',
+        formatCheck: fullData?.formatCheck || '',
       })
 
       setCurrentStep(fullData?.currentStep || 1) // 載入之前的步驟
       setActiveTab('submission') // 切換到投稿表單
       setIsEditingDraft(true) // 設置為編輯模式
+      setCurrentSubmissionId(latestSubmission.id) // 設定當前編輯的草稿ID
+      
+      // 恢復已上傳的檔案狀態 (使用最新的檔案資料)
+      const restoredFiles: any = {}
+      
+      if (latestSubmission.files && latestSubmission.files.length > 0) {
+        latestSubmission.files.forEach((file: any) => {
+          if (file.kind === 'MANUSCRIPT_ANONYMOUS') {
+            restoredFiles.manuscriptFile = {
+              id: file.id,
+              originalName: file.originalName,
+              size: file.size || 0,
+              version: file.version
+            }
+          } else if (file.kind === 'TITLE_PAGE') {
+            restoredFiles.titlePageFile = {
+              id: file.id,
+              originalName: file.originalName,
+              size: file.size || 0,
+              version: file.version
+            }
+          }
+        })
+      } else {
+      }
+      
+      setUploadedFiles(restoredFiles)
 
-      // 如果有檔案資訊，顯示提示
-      if (fullData?.fileInfo) {
-        setTimeout(() => {
-          alert(
-            `提示：此草稿原本包含檔案「${fullData.fileInfo.name}」，請重新上傳該檔案。`
-          )
-        }, 500)
+      // 檢查檔案狀態並清理過時的 localStorage 資訊
+      if (fullData?.manuscriptFileInfo || fullData?.titlePageFileInfo) {
+        let needsUpdate = false
+        let fileList = []
+        const updatedData = { ...fullData }
+        
+        // 檢查匿名稿件：如果已有實際檔案，清除 localStorage 中的過時資訊
+        if (fullData.manuscriptFileInfo) {
+          if (restoredFiles.manuscriptFile) {
+            // 已有實際檔案，清除 localStorage 中的檔案資訊
+            updatedData.manuscriptFileInfo = null
+            needsUpdate = true
+          } else {
+            // 沒有實際檔案，需要重新上傳
+            fileList.push(`匿名稿件「${fullData.manuscriptFileInfo.name}」`)
+          }
+        }
+        
+        // 檢查標題頁面：如果已有實際檔案，清除 localStorage 中的過時資訊
+        if (fullData.titlePageFileInfo) {
+          if (restoredFiles.titlePageFile) {
+            // 已有實際檔案，清除 localStorage 中的檔案資訊
+            updatedData.titlePageFileInfo = null
+            needsUpdate = true
+          } else {
+            // 沒有實際檔案，需要重新上傳
+            fileList.push(`標題頁面「${fullData.titlePageFileInfo.name}」`)
+          }
+        }
+        
+        // 更新 localStorage 清除過時資訊
+        if (needsUpdate) {
+          localStorage.setItem('submissionDraft', JSON.stringify(updatedData))
+        }
+        
+        // 只有當確實有檔案需要重新上傳時才顯示提示
+        if (fileList.length > 0) {
+          setTimeout(() => {
+            alert(
+              `提示：此草稿原本包含 ${fileList.join(' 和 ')}，請重新上傳檔案。`
+            )
+          }, 500)
+        }
       }
 
-      console.log('草稿已載入到編輯表單：', submission)
-      console.log('完整資料：', fullData)
     } catch (error) {
-      console.error('載入草稿失敗：', error)
       alert('載入草稿失敗，請稍後再試')
     }
   }
@@ -683,7 +1177,6 @@ export default function AuthorPage() {
       alert('草稿已成功刪除')
       refetch() // 重新載入列表
     } catch (err: any) {
-      console.error('刪除草稿失敗:', err)
       alert('刪除失敗: ' + (err.message || '未知錯誤'))
     }
   }
@@ -758,12 +1251,6 @@ export default function AuthorPage() {
                       >
                         提交日期
                       </th>
-                      <th
-                        scope="col"
-                        className="w-40 px-4 py-[24px] text-left text-24M font-medium"
-                      >
-                        會議軌道
-                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
@@ -809,9 +1296,6 @@ export default function AuthorPage() {
                           </td>
                           <td className="w-40 px-4 py-[60px] align-middle text-gray-500 tabular-nums text-24R">
                             {s.date}
-                          </td>
-                          <td className="w-40 px-4 py-[60px] align-middle text-gray-500 text-24R">
-                            {conference?.tracks?.[s.track] || s.track}
                           </td>
                         </tr>
                       ))
@@ -891,12 +1375,6 @@ export default function AuthorPage() {
                       >
                         送審日期
                       </th>
-                      <th
-                        scope="col"
-                        className="w-40 px-4 py-[24px] text-left text-24M font-medium"
-                      >
-                        會議軌道
-                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
@@ -942,9 +1420,6 @@ export default function AuthorPage() {
                           </td>
                           <td className="w-40 px-4 py-[60px] align-middle text-gray-500 tabular-nums text-24R">
                             {s.date}
-                          </td>
-                          <td className="w-40 px-4 py-[60px] align-middle text-gray-500 text-24R">
-                            {conference?.tracks?.[s.track] || s.track}
                           </td>
                         </tr>
                       ))
@@ -1024,12 +1499,6 @@ export default function AuthorPage() {
                       >
                         接受日期
                       </th>
-                      <th
-                        scope="col"
-                        className="w-40 px-4 py-[24px] text-left text-24M font-medium"
-                      >
-                        會議軌道
-                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
@@ -1075,9 +1544,6 @@ export default function AuthorPage() {
                           </td>
                           <td className="w-40 px-4 py-[60px] align-middle text-gray-500 tabular-nums text-24R">
                             {s.date}
-                          </td>
-                          <td className="w-40 px-4 py-[60px] align-middle text-gray-500 text-24R">
-                            {conference?.tracks?.[s.track] || s.track}
                           </td>
                         </tr>
                       ))
@@ -1157,12 +1623,6 @@ export default function AuthorPage() {
                       >
                         拒絕日期
                       </th>
-                      <th
-                        scope="col"
-                        className="w-40 px-4 py-[24px] text-left text-24M font-medium"
-                      >
-                        會議軌道
-                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
@@ -1208,9 +1668,6 @@ export default function AuthorPage() {
                           </td>
                           <td className="w-40 px-4 py-[60px] align-middle text-gray-500 tabular-nums text-24R">
                             {s.date}
-                          </td>
-                          <td className="w-40 px-4 py-[60px] align-middle text-gray-500 text-24R">
-                            {conference?.tracks?.[s.track] || s.track}
                           </td>
                         </tr>
                       ))
@@ -1839,12 +2296,20 @@ export default function AuthorPage() {
           switch (currentStep) {
             case 1:
               return (
-                <div className="space-y-6">
+                <div className="space-y-[56px]">
                   <div>
-                    <label className="block text-lg font-medium text-[#00182C] mb-4">
+                    <h1 className="text-3xl md:text-[64px] font-medium text-[#00182C] leading-tight">
+                      <span className="text-[#3B5FB9]">步驟一：</span>
+                      論文類型與會議子題
+                    </h1>
+                  </div>
+                  {/* 論文類型 */}
+                  <div className="bg-white rounded-lg ">
+                    <label className="block text-40M font-medium text-[#00182C] px-[48px] py-[40px]">
                       論文類型
                     </label>
-                    <div className="relative">
+                    <hr className="border-gray-200" />
+                    <div className="relative p-[48px]">
                       <select
                         value={submissionData.paperType}
                         onChange={e =>
@@ -1853,7 +2318,7 @@ export default function AuthorPage() {
                             paperType: e.target.value,
                           }))
                         }
-                        className="w-full p-4 border border-gray-300 rounded-lg appearance-none bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent"
+                        className="w-full p-4 pr-12 border border-gray-300 rounded-lg appearance-none bg-white text-gray-600 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#3B5FB9] focus:border-[#3B5FB9] transition-colors"
                       >
                         <option value="">選擇論文類型</option>
                         {PAPER_TYPES.map(type => (
@@ -1862,19 +2327,34 @@ export default function AuthorPage() {
                           </option>
                         ))}
                       </select>
+                      <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none">
+                        <svg
+                          className="w-5 h-5 text-gray-400"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      </div>
+                      {errors.paperType && (
+                        <p className="mt-2 text-sm text-red-600">
+                          {errors.paperType}
+                        </p>
+                      )}
                     </div>
-                    {errors.paperType && (
-                      <p className="mt-2 text-sm text-red-600">
-                        {errors.paperType}
-                      </p>
-                    )}
                   </div>
 
-                  <div>
-                    <label className="block text-lg font-medium text-[#00182C] mb-4">
+                  {/* 會議子題 */}
+                  <div className="bg-white rounded-lg">
+                    <label className="block text-40M font-medium text-[#00182C] px-[48px] py-[40px]">
                       會議子題
                     </label>
-                    <div className="relative">
+                    <hr className="border-gray-200" />
+                    <div className="relative p-[48px]">
                       <select
                         value={submissionData.conferenceSubject}
                         onChange={e =>
@@ -1883,7 +2363,7 @@ export default function AuthorPage() {
                             conferenceSubject: e.target.value,
                           }))
                         }
-                        className="w-full p-4 border border-gray-300 rounded-lg appearance-none bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent"
+                        className="w-full p-4 pr-12 border border-gray-300 rounded-lg appearance-none bg-white text-gray-600 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#3B5FB9] focus:border-[#3B5FB9] transition-colors"
                       >
                         <option value="">選擇會議子題</option>
                         {CONFERENCE_SUBJECTS.map(subject => (
@@ -1892,454 +2372,1297 @@ export default function AuthorPage() {
                           </option>
                         ))}
                       </select>
+                      <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none">
+                        <svg
+                          className="w-5 h-5 text-gray-400"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      </div>
+                      {errors.conferenceSubject && (
+                        <p className="mt-2 text-sm text-red-600">
+                          {errors.conferenceSubject}
+                        </p>
+                      )}
                     </div>
-                    {errors.conferenceSubject && (
-                      <p className="mt-2 text-sm text-red-600">
-                        {errors.conferenceSubject}
-                      </p>
-                    )}
                   </div>
                 </div>
               )
 
             case 2:
               return (
-                <div className="space-y-6">
+                <div className="space-y-[56px]">
                   <div>
-                    <label className="block text-lg font-medium text-[#00182C] mb-4">
+                    <h1 className="text-3xl md:text-[64px] font-medium text-[#00182C] leading-tight">
+                      <span className="text-[#3B5FB9]">步驟二：</span>
+                      標題與摘要
+                    </h1>
+                  </div>
+                  <div className="bg-white rounded-lg">
+                    <label className="block text-40M font-medium text-[#00182C] px-[48px] py-[40px]">
                       論文標題
                     </label>
-                    <input
-                      type="text"
-                      value={submissionData.title}
-                      onChange={e =>
-                        setSubmissionData(prev => ({
-                          ...prev,
-                          title: e.target.value,
-                        }))
-                      }
-                      className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent"
-                      placeholder="請輸入論文標題"
-                    />
-                    {errors.title && (
-                      <p className="mt-2 text-sm text-red-600">
-                        {errors.title}
-                      </p>
-                    )}
+                    <hr className="border-gray-200" />
+                    <div className="relative p-[48px]">
+                      <input
+                        type="text"
+                        value={submissionData.title}
+                        onChange={e =>
+                          setSubmissionData(prev => ({
+                            ...prev,
+                            title: e.target.value,
+                          }))
+                        }
+                        className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent"
+                        placeholder="請輸入論文標題"
+                      />
+                      {errors.title && (
+                        <p className="mt-2 text-sm text-red-600">
+                          {errors.title}
+                        </p>
+                      )}
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-lg font-medium text-[#00182C] mb-4">
-                      摘要
+                  <div className="bg-white rounded-lg">
+                    <label className="block text-40M font-medium text-[#00182C] px-[48px] py-[40px]">
+                      摘要（250字以內）
                     </label>
-                    <textarea
-                      value={submissionData.abstract}
-                      onChange={e =>
-                        setSubmissionData(prev => ({
-                          ...prev,
-                          abstract: e.target.value,
-                        }))
-                      }
-                      rows={8}
-                      className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent resize-none"
-                      placeholder="請輸入論文摘要（建議300-500字）"
-                    />
-                    {errors.abstract && (
-                      <p className="mt-2 text-sm text-red-600">
-                        {errors.abstract}
-                      </p>
-                    )}
+                    <hr className="border-gray-200" />
+                    <div className="relative p-[48px]">
+                      <textarea
+                        value={submissionData.abstract}
+                        onChange={e =>
+                          setSubmissionData(prev => ({
+                            ...prev,
+                            abstract: e.target.value,
+                          }))
+                        }
+                        rows={8}
+                        className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent resize-none"
+                        placeholder="請輸入論文摘要（建議300-500字）"
+                      />
+                      {errors.abstract && (
+                        <p className="mt-2 text-sm text-red-600">
+                          {errors.abstract}
+                        </p>
+                      )}
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-lg font-medium text-[#00182C] mb-4">
+                  <div className="bg-white rounded-lg">
+                    <label className="block text-40M font-medium text-[#00182C] px-[48px] py-[40px]">
                       關鍵詞
                     </label>
-                    <input
-                      type="text"
-                      value={submissionData.keywords}
-                      onChange={e =>
-                        setSubmissionData(prev => ({
-                          ...prev,
-                          keywords: e.target.value,
-                        }))
-                      }
-                      className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent"
-                      placeholder="請輸入3-5個關鍵詞，以逗號分隔"
-                    />
-                    {errors.keywords && (
-                      <p className="mt-2 text-sm text-red-600">
-                        {errors.keywords}
-                      </p>
-                    )}
+                    <hr className="border-gray-200" />
+                    <div className="relative p-[48px]">
+                      <input
+                        type="text"
+                        value={submissionData.keywords}
+                        onChange={e =>
+                          setSubmissionData(prev => ({
+                            ...prev,
+                            keywords: e.target.value,
+                          }))
+                        }
+                        className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent"
+                        placeholder="請輸入 3 至 5 組核心關鍵字，使用中文撰寫並以半形逗號（,）分隔"
+                      />
+                      {errors.keywords && (
+                        <p className="mt-2 text-sm text-red-600">
+                          {errors.keywords}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               )
 
             case 3:
               return (
-                <div className="space-y-6">
+                <div className="space-y-[56px]">
                   <div>
-                    <label className="block text-lg font-medium text-[#00182C] mb-4">
-                      上傳論文檔案
-                    </label>
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-                      {submissionData.file ? (
-                        <div className="space-y-4">
-                          <CheckCircle className="mx-auto w-12 h-12 text-green-500" />
-                          <p className="text-lg font-medium text-green-600">
-                            已上傳: {submissionData.file.name}
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setSubmissionData(prev => ({
-                                ...prev,
-                                file: null,
-                              }))
-                            }
-                            className="text-red-600 hover:text-red-800 font-medium"
-                          >
-                            移除檔案
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="space-y-4">
-                          <FileText className="mx-auto w-12 h-12 text-gray-400" />
-                          <div>
-                            <label
-                              htmlFor="file-upload"
-                              className="cursor-pointer"
-                            >
-                              <span className="text-lg font-medium text-[#3B5FB9] hover:text-[#2a4a99]">
-                                點擊上傳檔案
-                              </span>
-                              <input
-                                id="file-upload"
-                                type="file"
-                                accept=".pdf,.doc,.docx"
-                                onChange={handleFileUpload}
-                                className="hidden"
-                              />
-                            </label>
+                    <h1 className="text-3xl md:text-[64px] font-medium text-[#00182C] leading-tight">
+                      <span className="text-[#3B5FB9]">步驟三：</span>
+                      上傳稿件
+                    </h1>
+                  </div>
+                  <div className="space-y-[50px]">
+                    <div className="bg-white rounded-lg">
+                      <label className="block text-40M font-medium text-[#00182C] px-[48px] py-[40px]">
+                        稿件管理
+                      </label>
+                      <hr className="border-gray-200" />
+                      <div className="relative">
+                        <table className="w-full border-collapse text-left">
+                          <thead>
+                            <tr className="border-b border-gray-200 text-[#00182C] ">
+                              <th className="px-[30px] py-[24px] text-24M">
+                                編號
+                              </th>
+                              <th className="px-[30px] py-[24px] text-24M">
+                                檔案
+                              </th>
+                              <th className="px-[30px] py-[24px] text-24M">
+                                類別
+                              </th>
+                              <th className="px-[30px] py-[24px] text-24M">
+                                上傳日期
+                              </th>
+                              <th className="px-[30px] py-[24px] text-24M">
+                                上傳者
+                              </th>
+                              <th className="px-[30px] py-[24px] text-24M">
+                                操作
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-gray-700">
+                            {Object.entries(uploadedFiles).map(([fileType, fileInfo], index) => (
+                              <tr key={fileType} className="border-b border-gray-100">
+                                <td className="px-[30px] py-[60px] text-sm w-24">{index + 1}</td>
+                                <td className="px-[48px] py-[62px] text-blue-600 underline cursor-pointer text-sm"
+                                    onClick={() => downloadFile(fileInfo.id, fileInfo.originalName)}>
+                                  {fileInfo.originalName}
+                                  <div className="text-sm text-gray-500">
+                                    {Math.round(fileInfo.size / 1024)}KB
+                                  </div>
+                                </td>
+                                <td className="px-[30px] py-[60px] text-sm">
+                                  {fileType === 'manuscriptFile' ? '匿名稿件' : '標題頁面'}
+                                </td>
+                                <td className="px-[30px] py-[60px] text-sm">
+                                  {new Date().toLocaleString('zh-TW')}
+                                </td>
+                                <td className="px-[30px] py-[60px] text-sm">
+                                  {user?.email || ''}
+                                </td>
+                                <td className="px-[30px] py-[60px] text-sm">
+                                  <button 
+                                    onClick={() => {
+                                      const fileName = fileInfo.originalName
+                                      const fileTypeDisplay = fileType === 'manuscriptFile' ? '匿名稿件' : '標題頁面'
+                                      
+                                      if (confirm(`確定要刪除「${fileName}」(${fileTypeDisplay})嗎？刪除後可重新上傳新的檔案。`)) {
+                                        // 調用API實際刪除檔案
+                                        const deleteFile = async () => {
+                                          try {
+                                            const response = await fetch(`/api/submissions/files/${fileInfo.id}`, {
+                                              method: 'DELETE'
+                                            })
+                                            
+                                            if (!response.ok) {
+                                              const errorData = await response.json()
+                                              throw new Error(errorData.error || '檔案刪除失敗')
+                                            }
+                                            
+                                            // 清除 uploadedFiles 狀態
+                                            const newUploadedFiles = { ...uploadedFiles }
+                                            delete newUploadedFiles[fileType as keyof typeof uploadedFiles]
+                                            setUploadedFiles(newUploadedFiles)
+                                            
+                                            // 同時清除 submissionData 中對應的檔案
+                                            setSubmissionData(prev => ({
+                                              ...prev,
+                                              [fileType === 'manuscriptFile' ? 'manuscriptFile' : 'titlePageFile']: null
+                                            }))
+
+                                            // 立即更新 localStorage，清除被刪除檔案的資訊
+                                            const currentData = { ...submissionData }
+                                            const updatedData = {
+                                              ...currentData,
+                                              [fileType === 'manuscriptFile' ? 'manuscriptFile' : 'titlePageFile']: null,
+                                              // 更新檔案資訊
+                                              [fileType === 'manuscriptFile' ? 'manuscriptFileInfo' : 'titlePageFileInfo']: null,
+                                              draftId: currentSubmissionId || (localStorage.getItem('submissionDraft') ? JSON.parse(localStorage.getItem('submissionDraft')!).draftId : undefined)
+                                            }
+                                            
+                                            localStorage.setItem('submissionDraft', JSON.stringify(updatedData))
+                                            
+                                            alert(`檔案「${fileName}」已成功刪除`)
+                                            
+                                            // 重新載入submissions列表以獲取最新狀態
+                                            await refetch()
+                                            
+                                            // 強制更新當前的 submission 狀態
+                                            if (currentSubmissionId) {
+                                              try {
+                                                const response = await fetch(`/api/submissions/${currentSubmissionId}?_t=${Date.now()}`)
+                                                if (response.ok) {
+                                                  const data = await response.json()
+                                                  
+                                                  // 強制更新檔案狀態
+                                                  const latestFiles: any = {}
+                                                  if (data.submission.files && data.submission.files.length > 0) {
+                                                    data.submission.files.forEach((file: any) => {
+                                                      if (file.kind === 'MANUSCRIPT_ANONYMOUS') {
+                                                        latestFiles.manuscriptFile = {
+                                                          id: file.id,
+                                                          originalName: file.originalName,
+                                                          size: file.size || 0,
+                                                          version: file.version
+                                                        }
+                                                      } else if (file.kind === 'TITLE_PAGE') {
+                                                        latestFiles.titlePageFile = {
+                                                          id: file.id,
+                                                          originalName: file.originalName,
+                                                          size: file.size || 0,
+                                                          version: file.version
+                                                        }
+                                                      }
+                                                    })
+                                                  }
+                                                  setUploadedFiles(latestFiles)
+                                                }
+                                              } catch (error) {
+                                              }
+                                            }
+                                            
+                                          } catch (error) {
+                                            alert('檔案刪除失敗: ' + (error instanceof Error ? error.message : '未知錯誤'))
+                                          }
+                                        }
+                                        
+                                        deleteFile()
+                                      }
+                                    }}
+                                    className="text-red-500 border border-red-300 rounded-md px-3 py-1 hover:bg-red-50"
+                                  >
+                                    刪除
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                            {Object.keys(uploadedFiles).length === 0 && (
+                              <tr className="border-b border-gray-100">
+                                <td colSpan={6} className="px-[30px] py-[60px] text-center text-sm text-gray-500">
+                                  尚未上傳任何檔案
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-lg">
+                      <label className="block text-40M font-medium text-[#00182C] px-[48px] py-[40px]">
+                        上傳稿件
+                      </label>
+                      <hr className="border-gray-200" />
+                      
+                      {/* 檔案已存在提示 */}
+                      {Object.keys(uploadedFiles).length > 0 && (
+                        <div className="p-6 bg-blue-50 border-b border-gray-200">
+                          <div className="flex items-center gap-3">
+                            <div className="w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
+                              <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                              </svg>
+                            </div>
+                            <div>
+                              <p className="text-blue-800 font-medium">部分稿件已上傳</p>
+                              <p className="text-blue-600 text-sm">
+                                已上傳：
+                                {uploadedFiles.manuscriptFile && ' 匿名稿件'}
+                                {uploadedFiles.manuscriptFile && uploadedFiles.titlePageFile && '、'}
+                                {uploadedFiles.titlePageFile && ' 標題頁面'}
+                                。如需重新上傳特定檔案，請在「稿件管理」區塊刪除對應檔案。
+                              </p>
+                            </div>
                           </div>
-                          <p className="text-sm text-gray-500">
-                            支援格式：PDF, DOC, DOCX（最大 10MB）
-                          </p>
-                          {/* 顯示之前上傳過的檔案資訊（如果有的話） */}
-                          {(() => {
-                            try {
-                              const savedDraft =
-                                localStorage.getItem('submissionDraft')
-                              if (savedDraft) {
-                                const draftData = JSON.parse(savedDraft)
-                                if (draftData.fileInfo) {
-                                  return (
-                                    <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                                      <p className="text-sm text-blue-600">
-                                        💡 提示：之前保存的草稿包含檔案「
-                                        {draftData.fileInfo.name}
-                                        」，請重新上傳此檔案
-                                      </p>
-                                    </div>
-                                  )
-                                }
-                              }
-                            } catch (e) {
-                              // 忽略解析錯誤
-                            }
-                            return null
-                          })()}
                         </div>
                       )}
+
+                      <div className="">
+                        {/* 表頭：選擇 / 類別 */}
+                        <div className="border border-gray-200 rounded-lg overflow-hidden">
+                          <div className="grid grid-cols-12 text-[#00182C] border-b border-gray-200 bg-white">
+                            <div className="col-span-6 py-4 px-6 font-medium">
+                              選擇
+                            </div>
+                            <div className="col-span-6 py-4 px-6 font-medium">
+                              類別
+                            </div>
+                          </div>
+
+                          {/* 匿名稿件上傳 */}
+                          <div className={`grid grid-cols-12 items-center border-b border-gray-200 ${uploadedFiles.manuscriptFile ? 'bg-green-50' : ''}`}>
+                            <div className="col-span-6 py-5 px-6 flex items-center gap-3 min-w-0">
+                              {uploadedFiles.manuscriptFile ? (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
+                                    <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                  </div>
+                                  <span className="text-sm text-green-700 font-medium">已上傳</span>
+                                </div>
+                              ) : (
+                                <>
+                                  <label
+                                    htmlFor="manuscript-upload"
+                                    className="px-4 py-2 bg-gray-100 border border-gray-300 rounded text-sm text-gray-700 cursor-pointer hover:bg-gray-50 transition-colors"
+                                  >
+                                    選擇檔案
+                                  </label>
+                                  <input
+                                    id="manuscript-upload"
+                                    type="file"
+                                    accept=".doc,.docx,.pdf"
+                                    onChange={handleManuscriptFileUpload}
+                                    className="hidden"
+                                  />
+                                  <span className="text-sm text-gray-600 truncate max-w-[460px]">
+                                    {submissionData.manuscriptFile
+                                      ? submissionData.manuscriptFile.name
+                                      : '尚未選擇檔案'}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                            <div className="col-span-6 py-5 px-6 text-[#00182C]">
+                              匿名稿件
+                            </div>
+                            {errors.manuscriptFile && (
+                              <div className="col-span-12 -mt-2 px-6 pb-4">
+                                <p className="text-sm text-red-600">
+                                  {errors.manuscriptFile}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 標題頁面上傳 */}
+                          <div className={`grid grid-cols-12 items-center ${uploadedFiles.titlePageFile ? 'bg-green-50' : ''}`}>
+                            <div className="col-span-6 py-5 px-6 flex items-center gap-3 min-w-0">
+                              {uploadedFiles.titlePageFile ? (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
+                                    <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                  </div>
+                                  <span className="text-sm text-green-700 font-medium">已上傳</span>
+                                </div>
+                              ) : (
+                                <>
+                                  <label
+                                    htmlFor="titlepage-upload"
+                                    className="px-4 py-2 bg-gray-100 border border-gray-300 rounded text-sm text-gray-700 cursor-pointer hover:bg-gray-50 transition-colors"
+                                  >
+                                    選擇檔案
+                                  </label>
+                                  <input
+                                    id="titlepage-upload"
+                                    type="file"
+                                    accept=".doc,.docx,.pdf"
+                                    onChange={handleTitlePageFileUpload}
+                                    className="hidden"
+                                  />
+                                  <span className="text-sm text-gray-600 truncate max-w-[460px]">
+                                    {submissionData.titlePageFile
+                                      ? submissionData.titlePageFile.name
+                                      : '尚未選擇檔案'}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                            <div className="col-span-6 py-5 px-6 text-[#00182C]">
+                              標題頁面
+                            </div>
+                            {errors.titlePageFile && (
+                              <div className="col-span-12 -mt-2 px-6 pb-4">
+                                <p className="text-sm text-red-600">
+                                  {errors.titlePageFile}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 注意事項 */}
+                        <div className="p-[48px] rounded-lg">
+                          <h3 className="text-base font-medium text-gray-900 mb-3">
+                            注意事項：
+                          </h3>
+                          <ol className="list-decimal list-inside space-y-2 text-sm text-gray-700">
+                            <li>
+                              接受 Word 格式檔案（.doc, .docx）或 PDF 檔案。Word
+                              檔案將由系統自動轉換為 PDF 檔進行審查。
+                            </li>
+                            <li>
+                              請確認匿名稿件中未包含作者姓名、服務單位、致謝詞，及任何顯示作者資訊的頁首或頁尾。
+                            </li>
+                            <li>
+                              若為修訂稿再次投稿，請務必附上回覆審查意見文件（修訂說明），逐一回應各位審查委員的意見。
+                            </li>
+                          </ol>
+                          {/* 主行動按鈕 */}
+                          <div className="flex justify-center mt-[48px]">
+                            <button
+                              type="button"
+                              onClick={uploadFiles}
+                              disabled={
+                                (!submissionData.manuscriptFile && !uploadedFiles.manuscriptFile) ||
+                                (!submissionData.titlePageFile && !uploadedFiles.titlePageFile) ||
+                                uploadingFiles
+                              }
+                              className="w-full sm:w-[320px] h-12 rounded-lg bg-blue-600 text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
+                            >
+                              {uploadingFiles ? '上傳中...' : 
+                               (submissionData.manuscriptFile && !uploadedFiles.manuscriptFile) || 
+                               (submissionData.titlePageFile && !uploadedFiles.titlePageFile) 
+                                 ? '上傳選擇檔案' 
+                                 : '請先選擇檔案'}
+                            </button>
+                          </div>
+                          
+                          {/* 顯示上傳錯誤 */}
+                          {errors.upload && (
+                            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                              <p className="text-sm text-red-600">{errors.upload}</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    {errors.file && (
-                      <p className="mt-2 text-sm text-red-600">{errors.file}</p>
-                    )}
                   </div>
                 </div>
               )
 
             case 4:
               return (
-                <div className="space-y-6">
-                  <div className="flex justify-between items-center">
-                    <h3 className="text-lg font-medium text-[#00182C]">
-                      作者資訊
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={addAuthor}
-                      className="px-4 py-2 bg-[#3B5FB9] text-white rounded-lg hover:bg-[#2a4a99] transition-colors"
-                    >
-                      新增作者
-                    </button>
+                <div className="space-y-[56px]">
+                  <div>
+                    <h1 className="text-3xl md:text-[64px] font-medium text-[#00182C] leading-tight">
+                      <span className="text-[#3B5FB9]">步驟四：</span>
+                      作者
+                    </h1>
                   </div>
-
-                  {submissionData.authors.map((author, index) => (
-                    <div
-                      key={index}
-                      className="border border-gray-200 rounded-lg p-6 space-y-4"
-                    >
-                      <div className="flex justify-between items-center">
-                        <h4 className="font-medium text-[#00182C]">
-                          作者 {index + 1}
-                          {author.isCorresponding && (
-                            <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
-                              通訊作者
-                            </span>
-                          )}
-                        </h4>
-                        {submissionData.authors.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeAuthor(index)}
-                            className="text-red-600 hover:text-red-800"
-                          >
-                            移除
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-[#00182C] mb-2">
-                            姓名 *
-                          </label>
-                          <input
-                            type="text"
-                            value={author.name}
-                            onChange={e =>
-                              updateAuthor(index, 'name', e.target.value)
-                            }
-                            className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent"
-                          />
-                          {errors[`author_${index}_name`] && (
-                            <p className="mt-1 text-sm text-red-600">
-                              {errors[`author_${index}_name`]}
-                            </p>
-                          )}
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-[#00182C] mb-2">
-                            電子郵件 *
-                          </label>
-                          <input
-                            type="email"
-                            value={author.email}
-                            onChange={e =>
-                              updateAuthor(index, 'email', e.target.value)
-                            }
-                            className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent"
-                          />
-                          {errors[`author_${index}_email`] && (
-                            <p className="mt-1 text-sm text-red-600">
-                              {errors[`author_${index}_email`]}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="md:col-span-2">
-                          <label className="block text-sm font-medium text-[#00182C] mb-2">
-                            服務機構 *
-                          </label>
-                          <input
-                            type="text"
-                            value={author.institution}
-                            onChange={e =>
-                              updateAuthor(index, 'institution', e.target.value)
-                            }
-                            className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent"
-                          />
-                          {errors[`author_${index}_institution`] && (
-                            <p className="mt-1 text-sm text-red-600">
-                              {errors[`author_${index}_institution`]}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="md:col-span-2">
-                          <label className="flex items-center space-x-2">
-                            <input
-                              type="checkbox"
-                              checked={author.isCorresponding}
-                              onChange={e => {
-                                if (e.target.checked) {
-                                  setSubmissionData(prev => ({
-                                    ...prev,
-                                    authors: prev.authors.map((a, i) => ({
-                                      ...a,
-                                      isCorresponding: i === index,
-                                    })),
-                                  }))
-                                }
-                              }}
-                              className="w-4 h-4 text-[#3B5FB9] rounded border-gray-300 focus:ring-[#3B5FB9] focus:ring-2"
-                            />
-                            <span className="text-sm font-medium text-[#00182C]">
-                              設為通訊作者
-                            </span>
-                          </label>
-                        </div>
-                      </div>
+                  <div className="bg-white rounded-lg">
+                    {/* 標題列 */}
+                    <div className="flex justify-between items-center px-[48px] py-[40px]">
+                      <h3 className="text-40M font-medium text-[#00182C]">
+                        作者列表
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={addAuthor}
+                        className="flex items-center px-4 py-2 bg-[#3B5FB9] text-white rounded-lg hover:bg-[#2a4a99] transition-colors"
+                      >
+                        <span className="mr-2 text-lg">＋</span> 新增作者
+                      </button>
                     </div>
-                  ))}
+                    <hr className="border-gray-200" />
+
+                    {/* 表格 */}
+                    <div>
+                      <table className="w-full border-collapse text-left">
+                        <thead>
+                          <tr className="border-b border-gray-200 text-[#00182C]">
+                            <th className="py-3 px-4 w-20">作者序</th>
+                            <th className="py-3 px-4 w-24">通訊作者</th>
+                            <th className="py-3 px-4">電子郵件</th>
+                            <th className="py-3 px-4">作者</th>
+                            <th className="py-3 px-4">操作</th>
+                            <th className="py-3 px-4 w-24">排序</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-gray-700">
+                          {submissionData.authors.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="px-[30px] py-[60px] text-center text-sm text-gray-500">
+                                沒有
+                              </td>
+                            </tr>
+                          ) : (
+
+                          submissionData.authors.map((author, index) => (
+                            <tr
+                              key={index}
+                              className={
+                                index !== submissionData.authors.length - 1
+                                  ? 'border-b border-gray-100'
+                                  : ''
+                              }
+                            >
+                              {/* 作者序 */}
+                              <td className="py-4 px-4">{index + 1}</td>
+
+                              {/* 通訊作者 */}
+                              <td className="py-4 px-4">
+                                <input
+                                  type="radio"
+                                  name="correspondingAuthor"
+                                  checked={!!author.isCorresponding}
+                                  onChange={() => setCorresponding(index)}
+                                  className="w-4 h-4 text-[#3B5FB9] border-gray-300 focus:ring-[#3B5FB9]"
+                                />
+                              </td>
+
+                              {/* 電子郵件 */}
+                              <td className="py-4 px-4">
+                                {author.email || '-'}
+                              </td>
+
+                              {/* 作者（姓名 + 機構） */}
+                              <td className="py-4 px-4">
+                                <div>{author.name || '-'}</div>
+                                <div className="text-sm text-gray-500">
+                                  {author.institution || '-'}
+                                </div>
+                              </td>
+
+                              {/* 操作 */}
+                              <td className="py-4 px-4 space-x-2">
+                                <button
+                                  type="button"
+                                  onClick={() => editAuthor(index)}
+                                  className="px-3 py-1 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                                >
+                                  編輯
+                                </button>
+                                {submissionData.authors.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => removeAuthor(index)}
+                                    className="px-3 py-1 border border-red-300 text-red-500 rounded-md hover:bg-red-50"
+                                  >
+                                    刪除
+                                  </button>
+                                )}
+                              </td>
+
+                              {/* 排序 */}
+                              <td className="py-4 px-4 space-x-2">
+                                <button
+                                  type="button"
+                                  onClick={() => moveAuthor(index, -1)}
+                                  disabled={index === 0}
+                                  className="p-1 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40"
+                                  aria-label="上移"
+                                >
+                                  ↑
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => moveAuthor(index, +1)}
+                                  disabled={
+                                    index === submissionData.authors.length - 1
+                                  }
+                                  className="p-1 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40"
+                                  aria-label="下移"
+                                >
+                                  ↓
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
               )
 
             case 5:
               return (
-                <div className="space-y-6">
-                  <h3 className="text-lg font-medium text-[#00182C] mb-6">
-                    作者聲明
-                  </h3>
+                <div className="space-y-[56px]">
+                  <div>
+                    <h1 className="text-3xl md:text-[64px] font-medium text-[#00182C] leading-tight">
+                      <span className="text-[#3B5FB9]">步驟五：</span>
+                      作者聲明
+                    </h1>
+                  </div>
 
-                  <div className="space-y-6">
-                    <label className="flex items-start space-x-3">
-                      <input
-                        type="checkbox"
-                        checked={submissionData.agreements.originalWork}
-                        onChange={e =>
-                          setSubmissionData(prev => ({
-                            ...prev,
-                            agreements: {
-                              ...prev.agreements,
-                              originalWork: e.target.checked,
-                            },
-                          }))
-                        }
-                        className="mt-1 w-4 h-4 text-[#3B5FB9] rounded border-gray-300 focus:ring-[#3B5FB9] focus:ring-2"
-                      />
-                      <div>
-                        <span className="font-medium text-[#00182C]">
-                          原創作品聲明 *
-                        </span>
-                        <p className="text-sm text-gray-600 mt-1">
-                          我確認此論文為原創作品，未曾在其他期刊或研討會發表過，且未同時投稿至其他出版社或研討會。
+                  <div className="bg-white rounded-lg">
+                    <h4 className="text-40M text-[#00182C] px-[48px] py-[40px]">
+                      作者聲明
+                    </h4>
+                    <hr className="border-gray-200" />
+                    <div className="space-y-[48px]  p-[48px]  rounded-lg">
+                      <label className="flex items-start space-x-3">
+                        <input
+                          type="checkbox"
+                          checked={submissionData.agreements.originalWork}
+                          onChange={e =>
+                            setSubmissionData(prev => ({
+                              ...prev,
+                              agreements: {
+                                ...prev.agreements,
+                                originalWork: e.target.checked,
+                              },
+                            }))
+                          }
+                          className="mt-1 w-4 h-4 text-[#3B5FB9] rounded border-gray-300 focus:ring-[#3B5FB9] focus:ring-2"
+                        />
+                        <div>
+                          <span className="text-red-500">*</span>
+                          <span className="text-gray-900 ml-1">
+                            本人／我們確認本稿件僅投稿於本研討會，未曾發表，亦未同時送審。
+                          </span>
+                        </div>
+                      </label>
+                      {errors.originalWork && (
+                        <p className="text-sm text-red-600 ml-7">
+                          {errors.originalWork}
                         </p>
-                      </div>
-                    </label>
-                    {errors.originalWork && (
-                      <p className="text-sm text-red-600 ml-7">
-                        {errors.originalWork}
-                      </p>
-                    )}
+                      )}
 
-                    <label className="flex items-start space-x-3">
-                      <input
-                        type="checkbox"
-                        checked={submissionData.agreements.noConflictOfInterest}
-                        onChange={e =>
-                          setSubmissionData(prev => ({
-                            ...prev,
-                            agreements: {
-                              ...prev.agreements,
-                              noConflictOfInterest: e.target.checked,
-                            },
-                          }))
-                        }
-                        className="mt-1 w-4 h-4 text-[#3B5FB9] rounded border-gray-300 focus:ring-[#3B5FB9] focus:ring-2"
-                      />
-                      <div>
-                        <span className="font-medium text-[#00182C]">
-                          利益衝突聲明 *
-                        </span>
-                        <p className="text-sm text-gray-600 mt-1">
-                          我聲明此研究無任何可能影響研究客觀性或結果解釋的利益衝突。
+                      <label className="flex items-start space-x-3">
+                        <input
+                          type="checkbox"
+                          checked={
+                            submissionData.agreements.noConflictOfInterest
+                          }
+                          onChange={e =>
+                            setSubmissionData(prev => ({
+                              ...prev,
+                              agreements: {
+                                ...prev.agreements,
+                                noConflictOfInterest: e.target.checked,
+                              },
+                            }))
+                          }
+                          className="mt-1 w-4 h-4 text-[#3B5FB9] rounded border-gray-300 focus:ring-[#3B5FB9] focus:ring-2"
+                        />
+                        <div>
+                          <span className="text-red-500">*</span>
+                          <span className="text-gray-900 ml-1">
+                            本人／我們確認本研究嚴格遵循研究倫理，包括必要時取得受試者知情同意，並完全遵守所在地法律與相關規定。
+                          </span>
+                        </div>
+                      </label>
+                      {errors.noConflictOfInterest && (
+                        <p className="text-sm text-red-600 ml-7">
+                          {errors.noConflictOfInterest}
                         </p>
-                      </div>
-                    </label>
-                    {errors.noConflictOfInterest && (
-                      <p className="text-sm text-red-600 ml-7">
-                        {errors.noConflictOfInterest}
-                      </p>
-                    )}
+                      )}
 
-                    <label className="flex items-start space-x-3">
-                      <input
-                        type="checkbox"
-                        checked={submissionData.agreements.consentToPublish}
-                        onChange={e =>
-                          setSubmissionData(prev => ({
-                            ...prev,
-                            agreements: {
-                              ...prev.agreements,
-                              consentToPublish: e.target.checked,
-                            },
-                          }))
-                        }
-                        className="mt-1 w-4 h-4 text-[#3B5FB9] rounded border-gray-300 focus:ring-[#3B5FB9] focus:ring-2"
-                      />
-                      <div>
-                        <span className="font-medium text-[#00182C]">
-                          發表同意書 *
-                        </span>
-                        <p className="text-sm text-gray-600 mt-1">
-                          我同意在論文被接受後，將論文發表於研討會論文集中，並同意主辦單位使用此論文進行相關學術推廣活動。
+                      <label className="flex items-start space-x-3">
+                        <input
+                          type="checkbox"
+                          checked={submissionData.agreements.consentToPublish}
+                          onChange={e =>
+                            setSubmissionData(prev => ({
+                              ...prev,
+                              agreements: {
+                                ...prev.agreements,
+                                consentToPublish: e.target.checked,
+                              },
+                            }))
+                          }
+                          className="mt-1 w-4 h-4 text-[#3B5FB9] rounded border-gray-300 focus:ring-[#3B5FB9] focus:ring-2"
+                        />
+                        <div>
+                          <span className="text-red-500">*</span>
+                          <span className="text-gray-900 ml-1">
+                            本人／我們確認已準備一份不含作者姓名、服務單位、致謝詞，以及任何含作者資訊之頁首頁尾的完整稿件，以供匿名審查使用。
+                          </span>
+                        </div>
+                      </label>
+                      {errors.consentToPublish && (
+                        <p className="text-sm text-red-600 ml-7">
+                          {errors.consentToPublish}
                         </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="bg-white rounded-lg">
+                    <h4 className="text-40M text-[#00182C] px-[48px] py-[40px]">
+                      著作權相關確認事項
+                    </h4>
+                    <hr className="border-gray-200" />
+                    <div className="space-y-[48px] bg-white p-[48px] rounded-lg">
+                      <div className="space-y-4">
+                        <div>
+                          <span className="text-red-500">*</span>
+                          <span className="text-gray-900 ml-1">
+                            您是否已取得所有稿件中使用之著作權素材的授權？
+                          </span>
+
+                          <div className="mt-3 space-x-6">
+                            <label className="inline-flex items-center">
+                              <input
+                                type="radio"
+                                name="copyrightPermission"
+                                value="yes"
+                                checked={
+                                  submissionData.copyrightPermission === 'yes'
+                                }
+                                onChange={e =>
+                                  setSubmissionData(prev => ({
+                                    ...prev,
+                                    copyrightPermission: e.target.value,
+                                  }))
+                                }
+                                className="w-4 h-4 text-[#3B5FB9] border-gray-300 focus:ring-[#3B5FB9] focus:ring-2"
+                              />
+                              <span className="ml-2 text-gray-900">是</span>
+                            </label>
+                            <label className="inline-flex items-center">
+                              <input
+                                type="radio"
+                                name="copyrightPermission"
+                                value="no"
+                                checked={
+                                  submissionData.copyrightPermission === 'no'
+                                }
+                                onChange={e =>
+                                  setSubmissionData(prev => ({
+                                    ...prev,
+                                    copyrightPermission: e.target.value,
+                                  }))
+                                }
+                                className="w-4 h-4 text-[#3B5FB9] border-gray-300 focus:ring-[#3B5FB9] focus:ring-2"
+                              />
+                              <span className="ml-2 text-gray-900">否</span>
+                            </label>
+                          </div>
+                          {errors.copyrightPermission && (
+                            <p className="text-sm text-red-600 mt-2">
+                              {errors.copyrightPermission}
+                            </p>
+                          )}
+                        </div>
+
+                        <div>
+                          <span className="text-red-500">*</span>
+                          <span className="text-gray-900 ml-1">
+                            您是否已檢查稿件文法與拼字正確性，並確保格式完全符合
+                            APA 引用格式與文獻格式？
+                          </span>
+
+                          <div className="mt-3 space-x-6">
+                            <label className="inline-flex items-center">
+                              <input
+                                type="radio"
+                                name="formatCheck"
+                                value="yes"
+                                checked={submissionData.formatCheck === 'yes'}
+                                onChange={e =>
+                                  setSubmissionData(prev => ({
+                                    ...prev,
+                                    formatCheck: e.target.value,
+                                  }))
+                                }
+                                className="w-4 h-4 text-[#3B5FB9] border-gray-300 focus:ring-[#3B5FB9] focus:ring-2"
+                              />
+                              <span className="ml-2 text-gray-900">是</span>
+                            </label>
+                            <label className="inline-flex items-center">
+                              <input
+                                type="radio"
+                                name="formatCheck"
+                                value="no"
+                                checked={submissionData.formatCheck === 'no'}
+                                onChange={e =>
+                                  setSubmissionData(prev => ({
+                                    ...prev,
+                                    formatCheck: e.target.value,
+                                  }))
+                                }
+                                className="w-4 h-4 text-[#3B5FB9] border-gray-300 focus:ring-[#3B5FB9] focus:ring-2"
+                              />
+                              <span className="ml-2 text-gray-900">否</span>
+                            </label>
+                          </div>
+                          {errors.formatCheck && (
+                            <p className="text-sm text-red-600 mt-2">
+                              {errors.formatCheck}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </label>
-                    {errors.consentToPublish && (
-                      <p className="text-sm text-red-600 ml-7">
-                        {errors.consentToPublish}
-                      </p>
-                    )}
+                    </div>
                   </div>
                 </div>
               )
 
             case 6:
               return (
-                <div className="space-y-6">
-                  <h3 className="text-lg font-medium text-[#00182C] mb-6">
-                    確認投稿資訊
-                  </h3>
-
-                  <div className="bg-gray-50 rounded-lg p-6 space-y-4">
-                    <div>
-                      <h4 className="font-medium text-[#00182C] mb-2">
-                        論文基本資訊
-                      </h4>
-                      <p>
-                        <span className="font-medium">類型：</span>
-                        {
-                          PAPER_TYPES.find(
-                            t => t.value === submissionData.paperType
-                          )?.label
-                        }
-                      </p>
-                      <p>
-                        <span className="font-medium">會議子題：</span>
-                        {
-                          CONFERENCE_SUBJECTS.find(
-                            s => s.value === submissionData.conferenceSubject
-                          )?.label
-                        }
-                      </p>
-                      <p>
-                        <span className="font-medium">標題：</span>
-                        {submissionData.title}
-                      </p>
+                <div className="space-y-[56px]">
+                  <h1 className="text-3xl md:text-[64px] font-medium text-[#00182C] leading-tight">
+                    <span className="text-[#3B5FB9]">步驟六：</span>
+                    檢查並送出
+                  </h1>
+                  <hr className="border-gray-200" />
+                  <div className="space-y-6">
+                    {/* 步驟一：論文類型與會議子題 */}
+                    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                        <div className="flex items-center gap-3">
+                          <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                            <svg
+                              className="w-4 h-4 text-white"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                          </div>
+                          <h4 className="text-lg font-medium text-[#00182C]">
+                            步驟一：論文類型與會議子題
+                          </h4>
+                        </div>
+                        <button
+                          onClick={() => setCurrentStep(1)}
+                          className="px-4 py-2 bg-[#3B5FB9] text-white text-sm rounded-md hover:bg-[#2a4a99] transition-colors"
+                        >
+                          前往編輯
+                        </button>
+                      </div>
+                      <div className="p-4">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div className="space-y-2">
+                            <div>
+                              <span className="text-gray-600 block">項目</span>
+                            </div>
+                            <div className="py-2">
+                              <span className="text-gray-900">論文類型</span>
+                            </div>
+                            <div className="py-2 border-t border-gray-100">
+                              <span className="text-gray-900">會議子題</span>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <div>
+                              <span className="text-gray-600 block">內容</span>
+                            </div>
+                            <div className="py-2">
+                              <span className="text-gray-900">
+                                {PAPER_TYPES.find(
+                                  t => t.value === submissionData.paperType
+                                )?.label || ''}
+                              </span>
+                            </div>
+                            <div className="py-2 border-t border-gray-100">
+                              <span className="text-gray-900">
+                                {CONFERENCE_SUBJECTS.find(
+                                  s =>
+                                    s.value === submissionData.conferenceSubject
+                                )?.label || ''}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
-                    <div>
-                      <h4 className="font-medium text-[#00182C] mb-2">檔案</h4>
-                      <p>{submissionData.file?.name}</p>
+                    {/* 步驟二：標題與摘要 */}
+                    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                        <div className="flex items-center gap-3">
+                          <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                            <svg
+                              className="w-4 h-4 text-white"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                          </div>
+                          <h4 className="text-lg font-medium text-[#00182C]">
+                            步驟二：標題與摘要
+                          </h4>
+                        </div>
+                        <button
+                          onClick={() => setCurrentStep(2)}
+                          className="px-4 py-2 bg-[#3B5FB9] text-white text-sm rounded-md hover:bg-[#2a4a99] transition-colors"
+                        >
+                          前往編輯
+                        </button>
+                      </div>
+                      <div className="p-4">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div className="space-y-2">
+                            <div>
+                              <span className="text-gray-600 block">項目</span>
+                            </div>
+                            <div className="py-2">
+                              <span className="text-gray-900">標題</span>
+                            </div>
+                            <div className="py-2 border-t border-gray-100">
+                              <span className="text-gray-900">摘要</span>
+                            </div>
+                            <div className="py-2 border-t border-gray-100">
+                              <span className="text-gray-900">關鍵字</span>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <div>
+                              <span className="text-gray-600 block">內容</span>
+                            </div>
+                            <div className="py-2">
+                              <span className="text-gray-900">
+                                {submissionData.title || ''}
+                              </span>
+                            </div>
+                            <div className="py-2 border-t border-gray-100">
+                              <span className="text-gray-900">
+                                {submissionData.abstract || ''}
+                              </span>
+                            </div>
+                            <div className="py-2 border-t border-gray-100">
+                              <span className="text-gray-900">
+                                {submissionData.keywords || ''}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
-                    <div>
-                      <h4 className="font-medium text-[#00182C] mb-2">作者</h4>
-                      {submissionData.authors.map((author, index) => (
-                        <p key={index}>
-                          {author.name} ({author.institution})
-                          {author.isCorresponding && (
-                            <span className="text-blue-600 font-medium ml-1">
-                              通訊作者
-                            </span>
-                          )}
-                        </p>
-                      ))}
+                    {/* 步驟三：上傳稿件 */}
+                    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                        <div className="flex items-center gap-3">
+                          <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                            <svg
+                              className="w-4 h-4 text-white"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                          </div>
+                          <h4 className="text-lg font-medium text-[#00182C]">
+                            步驟三：上傳稿件
+                          </h4>
+                        </div>
+                        <button
+                          onClick={() => setCurrentStep(3)}
+                          className="px-4 py-2 bg-[#3B5FB9] text-white text-sm rounded-md hover:bg-[#2a4a99] transition-colors"
+                        >
+                          前往編輯
+                        </button>
+                      </div>
+                      <div className="p-4">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div className="space-y-2">
+                            <div>
+                              <span className="text-gray-600 block">項目</span>
+                            </div>
+                            <div className="py-2">
+                              <span className="text-gray-900">匿名稿件</span>
+                            </div>
+                            <div className="py-2 border-t border-gray-100">
+                              <span className="text-gray-900">標題頁面</span>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <div>
+                              <span className="text-gray-600 block">內容</span>
+                            </div>
+                            <div className="py-2">
+                              <span className="text-gray-900">
+                                {uploadedFiles.manuscriptFile?.originalName ||
+                                  submissionData.manuscriptFile?.name ||
+                                  '未上傳'}
+                              </span>
+                            </div>
+                            <div className="py-2 border-t border-gray-100">
+                              <span className="text-gray-900">
+                                {uploadedFiles.titlePageFile?.originalName ||
+                                  submissionData.titlePageFile?.name ||
+                                  '未上傳'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 步驟四：作者 */}
+                    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                        <div className="flex items-center gap-3">
+                          <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                            <svg
+                              className="w-4 h-4 text-white"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                          </div>
+                          <h4 className="text-lg font-medium text-[#00182C]">
+                            步驟四：作者
+                          </h4>
+                        </div>
+                        <button
+                          onClick={() => setCurrentStep(4)}
+                          className="px-4 py-2 bg-[#3B5FB9] text-white text-sm rounded-md hover:bg-[#2a4a99] transition-colors"
+                        >
+                          前往編輯
+                        </button>
+                      </div>
+                      <div className="p-0">
+                        {submissionData.authors.length > 0 ? (
+                          <div className="overflow-hidden">
+                            <table className="w-full">
+                              <thead>
+                                <tr className="bg-gray-50">
+                                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 border-b border-gray-200">
+                                    項目
+                                  </th>
+                                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-900 border-b border-gray-200">
+                                    內容
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {submissionData.authors.map((author, index) => (
+                                  <tr key={index} className="border-b border-gray-100 last:border-b-0">
+                                    <td className="px-4 py-4 text-sm text-gray-900 font-medium bg-gray-50/50">
+                                      作者{index + 1}
+                                      {author.isCorresponding && (
+                                        <div className="mt-1">
+                                          <span className="inline-block px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                                            通訊作者
+                                          </span>
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="px-4 py-4 text-sm text-gray-900">
+                                      <div className="space-y-1">
+                                        <div className="font-medium">{author.name}</div>
+                                        <div className="text-gray-600">{author.email}</div>
+                                        <div className="text-gray-600">{author.institution}</div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="p-4 text-center text-gray-500">
+                            尚未新增作者
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 步驟五：作者聲明 */}
+                    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                        <div className="flex items-center gap-3">
+                          <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                            <svg
+                              className="w-4 h-4 text-white"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                          </div>
+                          <h4 className="text-lg font-medium text-[#00182C]">
+                            步驟五：作者聲明
+                          </h4>
+                        </div>
+                        <button
+                          onClick={() => setCurrentStep(5)}
+                          className="px-4 py-2 bg-[#3B5FB9] text-white text-sm rounded-md hover:bg-[#2a4a99] transition-colors"
+                        >
+                          前往編輯
+                        </button>
+                      </div>
+                      <div className="p-6 space-y-6">
+                        {/* 作者聲明標題 */}
+                        <div>
+                          <h5 className="text-lg font-medium text-gray-900 mb-4">作者聲明</h5>
+                          
+                          {/* 聲明列表 */}
+                          <div className="space-y-4">
+                            <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-md">
+                              <div
+                                className={`w-5 h-5 mt-0.5 ${
+                                  submissionData.agreements.originalWork
+                                    ? 'bg-blue-600'
+                                    : 'bg-gray-300'
+                                } rounded flex items-center justify-center flex-shrink-0`}
+                              >
+                                {submissionData.agreements.originalWork && (
+                                  <svg
+                                    className="w-3 h-3 text-white"
+                                    fill="currentColor"
+                                    viewBox="0 0 20 20"
+                                  >
+                                    <path
+                                      fillRule="evenodd"
+                                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                      clipRule="evenodd"
+                                    />
+                                  </svg>
+                                )}
+                              </div>
+                              <span className="text-gray-900 text-sm leading-relaxed">
+                                本人／我們確認本稿件僅投稿於本研討會，未曾發表，亦未同時投送。
+                              </span>
+                            </div>
+                            
+                            <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-md">
+                              <div
+                                className={`w-5 h-5 mt-0.5 ${
+                                  submissionData.agreements.noConflictOfInterest
+                                    ? 'bg-blue-600'
+                                    : 'bg-gray-300'
+                                } rounded flex items-center justify-center flex-shrink-0`}
+                              >
+                                {submissionData.agreements.noConflictOfInterest && (
+                                  <svg
+                                    className="w-3 h-3 text-white"
+                                    fill="currentColor"
+                                    viewBox="0 0 20 20"
+                                  >
+                                    <path
+                                      fillRule="evenodd"
+                                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                      clipRule="evenodd"
+                                    />
+                                  </svg>
+                                )}
+                              </div>
+                              <span className="text-gray-900 text-sm leading-relaxed">
+                                本人／我們確認本研究恪遵循研究倫理，包括必要時取得受試者知情同意，並完全遵守所在地法律與相關規定。
+                              </span>
+                            </div>
+                            
+                            <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-md">
+                              <div
+                                className={`w-5 h-5 mt-0.5 ${
+                                  submissionData.agreements.consentToPublish
+                                    ? 'bg-blue-600'
+                                    : 'bg-gray-300'
+                                } rounded flex items-center justify-center flex-shrink-0`}
+                              >
+                                {submissionData.agreements.consentToPublish && (
+                                  <svg
+                                    className="w-3 h-3 text-white"
+                                    fill="currentColor"
+                                    viewBox="0 0 20 20"
+                                  >
+                                    <path
+                                      fillRule="evenodd"
+                                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                      clipRule="evenodd"
+                                    />
+                                  </svg>
+                                )}
+                              </div>
+                              <span className="text-gray-900 text-sm leading-relaxed">
+                                本人／我們確認已準備一份不含作者姓名、服務單位、致謝詞，以及任何可作者身分之資訊之完整稿件，以供各審查委員使用。
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 著作權相關確認事項 */}
+                        <div className="border-t border-gray-200 pt-6">
+                          <h5 className="text-lg font-medium text-gray-900 mb-4">著作權相關確認事項</h5>
+                          
+                          <div className="space-y-4">
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-3">
+                                <span className="text-red-500 text-sm">*</span>
+                                <span className="text-gray-900 text-sm">
+                                  本人／我們確認本稿件僅投稿於本研討會，未曾發表，亦未同時投送。
+                                </span>
+                              </div>
+                              <div className="flex gap-4 ml-4">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                                    submissionData.copyrightPermission === 'yes' 
+                                      ? 'border-blue-600 bg-blue-600' 
+                                      : 'border-gray-300'
+                                  }`}>
+                                    {submissionData.copyrightPermission === 'yes' && (
+                                      <div className="w-2.5 h-2.5 rounded-full bg-white"></div>
+                                    )}
+                                  </div>
+                                  <span className="text-sm text-gray-900">是</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                                    submissionData.copyrightPermission === 'no' 
+                                      ? 'border-blue-600 bg-blue-600' 
+                                      : 'border-gray-300'
+                                  }`}>
+                                    {submissionData.copyrightPermission === 'no' && (
+                                      <div className="w-2.5 h-2.5 rounded-full bg-white"></div>
+                                    )}
+                                  </div>
+                                  <span className="text-sm text-gray-900">否</span>
+                                </label>
+                              </div>
+                            </div>
+
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-3">
+                                <span className="text-red-500 text-sm">*</span>
+                                <span className="text-gray-900 text-sm">
+                                  您是否已檢查稿件文法與拼字正確性，並確保格式完全符合 APA 引用格式與文獻格式？
+                                </span>
+                              </div>
+                              <div className="flex gap-4 ml-4">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                                    submissionData.formatCheck === 'yes' 
+                                      ? 'border-blue-600 bg-blue-600' 
+                                      : 'border-gray-300'
+                                  }`}>
+                                    {submissionData.formatCheck === 'yes' && (
+                                      <div className="w-2.5 h-2.5 rounded-full bg-white"></div>
+                                    )}
+                                  </div>
+                                  <span className="text-sm text-gray-900">是</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                                    submissionData.formatCheck === 'no' 
+                                      ? 'border-blue-600 bg-blue-600' 
+                                      : 'border-gray-300'
+                                  }`}>
+                                    {submissionData.formatCheck === 'no' && (
+                                      <div className="w-2.5 h-2.5 rounded-full bg-white"></div>
+                                    )}
+                                  </div>
+                                  <span className="text-sm text-gray-900">否</span>
+                                </label>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2361,29 +3684,34 @@ export default function AuthorPage() {
 
         return (
           <div className="space-y-8 lg:space-y-14">
-            <div>
-              <h1 className="text-3xl md:text-[64px] font-medium text-[#00182C] leading-tight">
-                提交新稿件 - 步驟 {currentStep} / 6
-              </h1>
-            </div>
-
-            <div className="bg-white rounded-lg p-6 md:p-[48px]">
+            <div className="rounded-lg ">
               {/* Content */}
-              <div className="mb-8">{renderStepContent()}</div>
+              <div className="mb-12">{renderStepContent()}</div>
 
               {/* Navigation */}
-              <div className="flex justify-between items-center pt-6 border-t border-gray-200">
-                <button
-                  onClick={saveDraft}
-                  className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-                >
-                  保存草稿
-                </button>
+              <div className="flex justify-between items-center border-t border-gray-200">
+                <div className="flex gap-3">
+                  <button
+                    onClick={saveDraft}
+                    className="px-8 py-3 bg-white text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                  >
+                    保存
+                  </button>
+                  
+                  {currentStep > 1 && (
+                    <button
+                      onClick={prevStep}
+                      className="px-8 py-3 bg-white text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                    >
+                      上一步
+                    </button>
+                  )}
+                </div>
 
                 {currentStep < 6 ? (
                   <button
                     onClick={nextStep}
-                    className="px-6 py-2 bg-[#3B5FB9] text-white rounded-lg hover:bg-[#2a4a99] transition-colors"
+                    className="px-8 py-3 bg-[#3B5FB9] text-white rounded-lg hover:bg-[#2a4a99] transition-colors font-medium"
                   >
                     下一步
                   </button>
@@ -2498,7 +3826,7 @@ export default function AuthorPage() {
               </div>
 
               {/* 右側：研討會標題和控制項 */}
-              <div className="relative z-[60] bg-white flex-1 px-6 md:px-[48px] py-6 md:py-[45px] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="relative z-[10] bg-white flex-1 px-6 md:px-[48px] py-6 md:py-[45px] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div className="flex-1">
                   <h1 className="text-lg md:text-[28px] font-medium text-[#3B5FB9] leading-tight">
                     2025 AI時代課程教學與傳播科技研討會
@@ -3046,6 +4374,87 @@ export default function AuthorPage() {
                 className="px-4 py-2 bg-[#3B5FB9] text-white rounded-lg hover:bg-[#2a4a99]"
               >
                 編輯此草稿
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 作者模態視窗 */}
+      {showAuthorModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            {/* 標題列 */}
+            <div className="flex justify-between items-center p-6 border-b border-gray-200">
+              <h3 className="text-lg font-medium text-[#00182C]">
+                {modalMode === 'add' ? '新增作者' : '編輯作者'}
+              </h3>
+              <button
+                onClick={handleModalCancel}
+                className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* 表單內容 */}
+            <div className="p-6 space-y-4">
+              {/* 電子郵件 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <span className="text-red-500">*</span>電子郵件
+                </label>
+                <input
+                  type="email"
+                  placeholder="e-mail"
+                  value={modalAuthorData.email}
+                  onChange={(e) => setModalAuthorData(prev => ({ ...prev, email: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent"
+                />
+              </div>
+
+              {/* 作者姓名 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <span className="text-red-500">*</span>作者
+                </label>
+                <input
+                  type="text"
+                  placeholder="姓名"
+                  value={modalAuthorData.name}
+                  onChange={(e) => setModalAuthorData(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent"
+                />
+              </div>
+
+              {/* 服務單位與職稱 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  服務單位與職稱
+                </label>
+                <input
+                  type="text"
+                  placeholder="服務單位與職稱"
+                  value={modalAuthorData.institution}
+                  onChange={(e) => setModalAuthorData(prev => ({ ...prev, institution: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#3B5FB9] focus:border-transparent"
+                />
+              </div>
+            </div>
+
+            {/* 按鈕列 */}
+            <div className="flex justify-end gap-3 p-6 border-t border-gray-200">
+              <button
+                onClick={handleModalCancel}
+                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleModalSave}
+                className="px-6 py-2 bg-[#3B5FB9] text-white rounded-lg hover:bg-[#2a4a99] transition-colors"
+              >
+                {modalMode === 'add' ? '新增' : '儲存'}
               </button>
             </div>
           </div>

@@ -44,6 +44,19 @@
 
   /* 從 Figma 設計系統提取的字體大小 - 基於 Noto Sans TC */
   --font-family-sans: "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --text-sm: 20px;
+  --text-sm--line-height: 28px;
+  --text-sm--letter-spacing: 4%;
+  --text-sm--font-weight: 400;
+
+  --text-base: 24px;
+  --text-base--line-height: 32px;
+  --text-base--letter-spacing: 4%;
+  --text-base--font-weight: 400;
+  
+  --text-lg: 28px;
+  
   
   --text-64R: 64px;
   --text-64R--line-height: 80px;

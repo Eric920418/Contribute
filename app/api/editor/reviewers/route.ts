@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '權限不足，需要編輯權限' }, { status: 403 })
     }
 
-    // 取得所有審稿人
+    // 取得所有審稿人（編輯和審稿人角色不需要郵箱驗證）
     const reviewers = await prisma.user.findMany({
       where: {
         roles: {
@@ -25,9 +25,6 @@ export async function GET(request: NextRequest) {
               key: 'REVIEWER'
             }
           }
-        },
-        emailVerifiedAt: {
-          not: null
         }
       },
       select: {
