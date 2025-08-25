@@ -21,8 +21,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '缺少檔案ID參數' }, { status: 400 })
     }
 
-    // 查找檔案記錄
-    const fileAsset = await prisma.fileAsset.findUnique({
+    // 首先嘗試查找正式投稿檔案
+    let fileAsset = await prisma.fileAsset.findUnique({
       where: { id: fileId },
       include: {
         submission: {
@@ -33,36 +33,65 @@ export async function GET(request: NextRequest) {
       }
     })
 
+    let isDraft = false
+    let draftFileAsset = null
 
+    // 如果找不到正式投稿檔案，嘗試查找草稿檔案
     if (!fileAsset) {
+      draftFileAsset = await prisma.draftFileAsset.findUnique({
+        where: { id: fileId },
+        include: {
+          draft: {
+            include: {
+              creator: true
+            }
+          }
+        }
+      })
+      
+      if (draftFileAsset) {
+        isDraft = true
+      }
+    }
+
+    if (!fileAsset && !draftFileAsset) {
       return NextResponse.json({ error: '檔案不存在' }, { status: 404 })
     }
 
-    // 權限檢查 - 只有投稿者、審稿人（如果被指派）、編輯和主編可以下載
-    const hasPermission = 
-      fileAsset.submission.createdBy === session.userId || // 投稿者
-      session.roles.includes('EDITOR') || // 編輯
-      session.roles.includes('CHIEF_EDITOR') // 主編
+    // 權限檢查
+    let hasPermission = false
+
+    if (isDraft) {
+      // 草稿檔案：只有作者本人可以下載
+      hasPermission = draftFileAsset.draft.createdBy === session.userId
+    } else {
+      // 正式投稿檔案：投稿者、審稿人（如果被指派）、編輯和主編可以下載
+      hasPermission = 
+        fileAsset.submission.createdBy === session.userId || // 投稿者
+        session.roles.includes('EDITOR') || // 編輯
+        session.roles.includes('CHIEF_EDITOR') // 主編
+      
+      // TODO: 檢查是否為指派的審稿人
+    }
     
-    
-    // TODO: 檢查是否為指派的審稿人
     if (!hasPermission) {
       return NextResponse.json({ error: '無權限下載此檔案' }, { status: 403 })
     }
 
     // 讀取檔案
-    const filePath = join(process.cwd(), fileAsset.path)
+    const targetFile = isDraft ? draftFileAsset : fileAsset
+    const filePath = join(process.cwd(), targetFile.path)
     
     try {
       const fileBuffer = await readFile(filePath)
       
       // 根據檔案類型設定適當的 headers
       const response = new NextResponse(fileBuffer)
-      response.headers.set('Content-Type', fileAsset.mimeType)
-      response.headers.set('Content-Length', fileAsset.size.toString())
+      response.headers.set('Content-Type', targetFile.mimeType)
+      response.headers.set('Content-Length', targetFile.size.toString())
       
       // 正確處理包含中文或特殊字符的檔案名稱
-      const encodedFilename = encodeURIComponent(fileAsset.originalName)
+      const encodedFilename = encodeURIComponent(targetFile.originalName)
       response.headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodedFilename}`)
       
       return response

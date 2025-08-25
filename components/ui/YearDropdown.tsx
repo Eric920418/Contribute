@@ -1,16 +1,18 @@
 // YearDropdown.tsx
 import { useEffect, useRef, useState } from 'react'
 
-type Option = { value: number; label: string }
+type Option = { value: number; label: string; id?: string }
 
 export default function YearDropdown({
   value,
+  selectedId,
   onChange,
   options,
   className = '',
 }: {
   value: number
-  onChange: (v: number) => void
+  selectedId?: string
+  onChange: (conferenceId: string, year: number) => void
   options: Option[]
   className?: string
 }) {
@@ -30,7 +32,7 @@ export default function YearDropdown({
     }
   }, [])
 
-  const selected = options.find(o => o.value === value) ?? options[0]
+  const selected = options.find(o => (selectedId ? o.id === selectedId : o.value === value)) ?? options[0] ?? { value: 0, label: '載入中...', id: 'loading' }
 
   return (
     <div className={`relative z-[9999] ${className}`} ref={ref}>
@@ -39,10 +41,10 @@ export default function YearDropdown({
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen(v => !v)}
-        className="inline-flex items-center gap-2 focus:outline-none"
+        className="inline-flex items-center gap-2 focus:outline-none max-w-xs lg:max-w-md"
       >
-        <span className="text-28M text-[#00182C]">{selected.label}</span>
-        <svg width="48" height="48" viewBox="0 0 32 28" aria-hidden="true">
+        <span className="text-28M text-[#00182C] truncate">{selected?.label || '載入中...'}</span>
+        <svg width="48" height="48" viewBox="0 0 32 28" aria-hidden="true" className="flex-shrink-0">
           <path
             d="M7 10l5 5 5-5"
             fill="none"
@@ -55,22 +57,26 @@ export default function YearDropdown({
       {open && (
         <ul
           role="listbox"
-          className="absolute right-0 top-full mt-2 w-36 rounded-lg border border-slate-200 bg-white shadow-lg z-[9999]"
+          className="absolute right-0 top-full mt-2 min-w-80 max-w-96 rounded-lg border border-slate-200 bg-white shadow-lg z-[9999]"
         >
-          {options.map(opt => (
+          {options.length > 0 ? options.map(opt => (
             <li
-              key={opt.value}
+              key={opt.id || opt.value}
               role="option"
-              aria-selected={opt.value === value}
+              aria-selected={selectedId ? opt.id === selectedId : opt.value === value}
               onClick={() => {
-                onChange(opt.value)
+                onChange(opt.id || `year-${opt.value}`, opt.value)
                 setOpen(false)
               }}
-              className="cursor-pointer px-3 py-2 text-slate-800 hover:bg-slate-100"
+              className="cursor-pointer px-3 py-2 text-slate-800 hover:bg-slate-100 text-sm leading-relaxed"
             >
               {opt.label}
             </li>
-          ))}
+          )) : (
+            <li className="px-3 py-2 text-slate-400 text-sm">
+              載入中...
+            </li>
+          )}
         </ul>
       )}
     </div>

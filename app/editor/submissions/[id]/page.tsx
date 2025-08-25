@@ -17,11 +17,20 @@ interface Submission {
   keywords: string
   submittedAt: string
   files: FileInfo[]
+  conference?: {
+    id: string
+    year: number
+    title: string
+    tracks: any
+  }
 }
 
 interface FileInfo {
+  id: string
   name: string
   url: string
+  type: string
+  size: number
 }
 
 interface ReviewResult {
@@ -51,6 +60,7 @@ export default function SubmissionDetailPage() {
   const [publishPhysicalChecked, setPublishPhysicalChecked] = useState(false)
   const [rejectChecked, setRejectChecked] = useState(false)
   const [error, setError] = useState('')
+  const [isSubmittingDecision, setIsSubmittingDecision] = useState(false)
 
   // 左側邊欄稿件列表
   const [submissionList, setSubmissionList] = useState<{id: string, title: string, current: boolean}[]>([])
@@ -60,11 +70,45 @@ export default function SubmissionDetailPage() {
   
   // 已指派的審稿人
   const [assignedReviewers, setAssignedReviewers] = useState<any[]>([])
+
+  // 檔案下載函數
+  const downloadFile = async (fileId: string, originalName: string) => {
+    try {
+      const response = await fetch(`/api/submissions/download?fileId=${fileId}`)
+      
+      if (!response.ok) {
+        let errorData
+        try {
+          errorData = await response.json()
+        } catch (e) {
+          errorData = { error: `HTTP ${response.status}: ${response.statusText}` }
+        }
+        throw new Error(errorData.error || `檔案下載失敗 (${response.status})`)
+      }
+      
+      // 創建下載連結
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = originalName
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('檔案下載失敗:', error)
+      alert('檔案下載失敗: ' + (error instanceof Error ? error.message : '未知錯誤'))
+    }
+  }
   
   // 載入稿件列表
-  const loadSubmissionsList = async () => {
+  const loadSubmissionsList = async (conferenceId?: string) => {
     try {
-      const response = await fetch('/api/editor/submissions?limit=50')
+      const url = conferenceId 
+        ? `/api/editor/submissions?limit=50&conferenceId=${conferenceId}`
+        : '/api/editor/submissions?limit=50'
+      const response = await fetch(url)
       if (response.ok) {
         const data = await response.json()
         const list = data.submissions.map((sub: any) => ({
@@ -100,7 +144,7 @@ export default function SubmissionDetailPage() {
   useEffect(() => {
     if (submissionId) {
       fetchSubmissionDetails()
-      loadSubmissionsList()
+      // 不再初始載入所有稿件，會在fetchSubmissionDetails成功後根據conference載入
     }
   }, [submissionId])
 
@@ -110,10 +154,16 @@ export default function SubmissionDetailPage() {
       const response = await fetch(`/api/editor/submissions/${submissionId}`)
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
       }
       
       const data = await response.json()
+      
+      if (!data.submission) {
+        throw new Error('無法獲取稿件資料')
+      }
+      
       const submissionData = data.submission
       
       // 轉換資料格式以符合 Submission 介面
@@ -124,13 +174,27 @@ export default function SubmissionDetailPage() {
         abstract: submissionData.abstract,
         keywords: submissionData.keywords || '',
         submittedAt: submissionData.submittedAt ? new Date(submissionData.submittedAt).toLocaleDateString('zh-TW') : '',
-        files: submissionData.files.map((file: any) => ({
+        files: submissionData.files ? submissionData.files.map((file: any) => ({
+          id: file.id,
           name: file.originalName,
-          url: `/api/files/${file.id}/download` // 假設有檔案下載 API
-        }))
+          url: `/api/submissions/download?fileId=${file.id}`,
+          type: file.kind,
+          size: file.size || 0
+        })) : [],
+        conference: submissionData.conference ? {
+          id: submissionData.conference.id,
+          year: submissionData.conference.year,
+          title: submissionData.conference.title,
+          tracks: submissionData.conference.tracks
+        } : undefined
       }
 
       setSubmission(formattedSubmission)
+      
+      // 根據當前稿件的conference重新載入稿件列表
+      if (submissionData.conference?.id) {
+        loadSubmissionsList(submissionData.conference.id)
+      }
       
       // 保存已指派的審稿人（包括未完成的）
       setAssignedReviewers(submissionData.reviewAssignments || [])
@@ -157,16 +221,71 @@ export default function SubmissionDetailPage() {
   }
 
 
-  const handleDecisionSubmit = () => {
-    console.log('Editor Decision:', {
-      submissionId,
-      decision: editorDecision,
-      text: decisionText,
-      publishOnline: publishOnlineChecked,
-      publishPhysical: publishPhysicalChecked,
-      reject: rejectChecked
-    })
-    // 這裡應該呼叫 API 提交決議
+  const handleDecisionSubmit = async () => {
+    // 檢查是否有做出決議選擇
+    if (!publishOnlineChecked && !publishPhysicalChecked && !rejectChecked) {
+      setError('請選擇一個決議選項：線上發表、印刷發表或拒絕')
+      return
+    }
+
+    // 確定決議結果
+    let decision = ''
+    if (rejectChecked) {
+      decision = 'REJECT'
+    } else if (publishOnlineChecked || publishPhysicalChecked) {
+      decision = 'ACCEPT'
+    } else {
+      decision = 'REVISE'
+    }
+
+    // 建立詳細說明
+    let detailedNote = decisionText
+    if (publishOnlineChecked) {
+      detailedNote += (detailedNote ? '\n\n' : '') + '決議：以線上論文發表'
+    }
+    if (publishPhysicalChecked) {
+      detailedNote += (detailedNote ? '\n\n' : '') + '決議：以印刷論文發表'
+    }
+
+    setIsSubmittingDecision(true)
+    setError('')
+
+    try {
+      const response = await fetch(`/api/editor/submissions/${submissionId}/decision`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          decision: decision,
+          note: detailedNote.trim() || null
+        })
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || '提交決議失敗')
+      }
+
+      // 成功提交後的處理
+      alert('決議已成功提交並通知投稿者！')
+      
+      // 重新載入稿件資訊
+      await fetchSubmissionDetails()
+      
+      // 清空表單
+      setDecisionText('')
+      setPublishOnlineChecked(false)
+      setPublishPhysicalChecked(false)
+      setRejectChecked(false)
+
+    } catch (err) {
+      console.error('Submit decision error:', err)
+      setError('提交決議失敗: ' + (err instanceof Error ? err.message : '未知錯誤'))
+    } finally {
+      setIsSubmittingDecision(false)
+    }
   }
 
   if (loading || authLoading) {
@@ -251,12 +370,12 @@ export default function SubmissionDetailPage() {
                         : 'text-blue-600'
                     } leading-tight`}
                   >
-                    2025 AI時代課程教學與傳播科技研討會
+                    {submission?.conference?.title || '載入研討會資訊中...'}
                   </h1>
                   <div className="w-[2px] h-[56px] bg-gray-200"></div>
                 </div>
                 <div className="relative z-[70] flex items-center gap-[40px]">
-                  <div 
+                  <div
                     onClick={() => router.push('/editor/dashboard')}
                     className="text-24M font-medium text-gray-900 hover:text-gray-600 cursor-pointer"
                   >
@@ -267,25 +386,22 @@ export default function SubmissionDetailPage() {
             </div>
           </div>
 
-          <div className="flex">
+          <div className="flex gap-[56px]">
             {/* 左側邊欄 - 稿件列表 */}
-            <div className="w-64 bg-white border-r min-h-screen">
-              {/* 稿件ID顯示 */}
-              <div className="p-4 border-b">
-                <div className="text-sm text-gray-500">稿件ID：{submissionId}</div>
-              </div>
-
+            <div className="w-fit bg-white border-r min-h-screen">
               {/* 稿件列表 */}
-              <div className="p-4">
-                <h3 className="text-sm font-medium text-gray-700 mb-3">
-                  稿件列表
+              <div className="p-[48px]">
+                <h3 className="text-28M font-medium text-gray-700 mb-3 flex items-center gap-2">
+                  <PenTool className="w-4 h-4" /> 審稿列表
                 </h3>
-                <div className="space-y-1">
+                <div className="space-y-1 mt-[16px] ">
                   {submissionList.map(item => (
                     <div
                       key={item.id}
-                      onClick={() => router.push(`/editor/submissions/${item.id}`)}
-                      className={`p-2 text-sm rounded cursor-pointer ${
+                      onClick={() =>
+                        router.push(`/editor/submissions/${item.id}`)
+                      }
+                      className={`p-2 w-[300px] text-sm rounded cursor-pointer overflow-hidden ${
                         item.current
                           ? 'bg-purple-100 text-purple-700 border-l-3 border-purple-500'
                           : 'text-gray-600 hover:bg-gray-50'
@@ -294,7 +410,9 @@ export default function SubmissionDetailPage() {
                     >
                       <div className="font-medium">稿件ID：{item.id}</div>
                       <div className="text-xs mt-1 truncate opacity-75">
-                        {item.title.length > 25 ? item.title.substring(0, 25) + '...' : item.title}
+                        {item.title.length > 25
+                          ? item.title.substring(0, 25) + '...'
+                          : item.title}
                       </div>
                     </div>
                   ))}
@@ -303,9 +421,14 @@ export default function SubmissionDetailPage() {
             </div>
 
             {/* 右側主要內容 */}
-            <div className="flex-1 p-8">
+            <div className="flex-1">
+              {/* 稿件ID顯示 */}
+              <div className="text-[32px] font-medium text-gray-500">
+                稿件ID：{submissionId}
+              </div>
+              <hr className="border-gray-300 mt-[24px]" />
               {/* 頁面標題 */}
-              <h1 className="text-2xl font-bold text-gray-900 mb-8">
+              <h1 className="text-[64px] font-bold text-gray-900 my-[48px]">
                 稿件資訊
               </h1>
 
@@ -313,59 +436,90 @@ export default function SubmissionDetailPage() {
                 <div className="space-y-8">
                   {/* 稿件資訊區塊 */}
                   <div className="bg-white">
-                    <h2 className="text-xl font-bold text-gray-900 mb-6">
-                      稿件資訊
-                    </h2>
-
-                    <div className="space-y-4">
+                    <div className="space-y-[48px] p-[48px]">
                       <div>
-                        <h3 className="text-lg font-medium text-gray-900 mb-2">
+                        <h3 className="text-40M font-medium text-gray-900 ">
                           {submission.title}
                         </h3>
                       </div>
 
-                      <div className="grid grid-cols-1 gap-4 text-sm">
+                      <div className="grid grid-cols-1 gap-4 text-sm space-y-[48px]">
                         <div>
-                          <span className="font-medium text-gray-700">
+                          <span className="text-28M font-medium text-gray-700">
                             摘要：
                           </span>
-                          <span className="text-gray-600">
+                          <span className="text-28M text-gray-600">
                             {submission.abstract}
                           </span>
                         </div>
 
                         <div>
-                          <span className="font-medium text-gray-700">
+                          <span className="text-28M font-medium text-gray-700">
                             關鍵字：
                           </span>
-                          <span className="text-gray-600">
-                            {submission.keywords}
+                          <span className="text-28M text-gray-600">
+                            {submission.keywords || '未提供'}
                           </span>
                         </div>
 
                         <div>
-                          <span className="font-medium text-gray-700">
+                          <span className="text-28M font-medium text-gray-700">
                             提交日期：
                           </span>
-                          <span className="text-gray-600">
-                            {submission.submittedAt}
+                          <span className="text-28M text-gray-600">
+                            {submission.submittedAt || '未提交'}
                           </span>
                         </div>
 
                         <div>
-                          <span className="font-medium text-gray-700">
+                          <span className="text-28M font-medium text-gray-700">
                             稿件資料：
                           </span>
-                          <div className="mt-1 space-y-1">
-                            {submission.files.map((file, index) => (
-                              <a
-                                key={index}
-                                href={file.url}
-                                className="text-purple-600 hover:text-purple-800 block"
-                              >
-                                {file.name}
-                              </a>
-                            ))}
+                          <div className="mt-4">
+                            {submission.files && submission.files.length > 0 ? (
+                              <div className="overflow-x-auto">
+                                <table className="min-w-full bg-white border border-gray-200 rounded-lg">
+                                  <thead className="bg-gray-50">
+                                    <tr>
+                                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">序號</th>
+                                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">檔案名稱</th>
+                                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">類型</th>
+                                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">大小</th>
+                                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">操作</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-200">
+                                    {submission.files.map((file, index) => (
+                                      <tr key={index} className="hover:bg-gray-50">
+                                        <td className="px-4 py-3 text-sm text-gray-900">{index + 1}</td>
+                                        <td className="px-4 py-3">
+                                          <div className="text-sm text-gray-900 font-medium">{file.name}</div>
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-gray-600">
+                                          {file.type === 'MANUSCRIPT_ANONYMOUS' ? '匿名稿件' : 
+                                           file.type === 'TITLE_PAGE' ? '標題頁面' : '其他'}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-gray-600">
+                                          {file.size ? `${Math.round(file.size / 1024)}KB` : '-'}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm">
+                                          <button
+                                            onClick={() => downloadFile(file.id, file.name)}
+                                            className="text-purple-600 hover:text-purple-800 font-medium"
+                                          >
+                                            下載
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <div className="text-28M text-gray-500 py-4 text-center bg-gray-50 rounded-lg">
+                                尚無檔案
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -413,24 +567,33 @@ export default function SubmissionDetailPage() {
                           </thead>
                           <tbody>
                             {assignedReviewers.map((assignment: any) => (
-                              <tr key={assignment.id} className="border-b border-gray-100">
+                              <tr
+                                key={assignment.id}
+                                className="border-b border-gray-100"
+                              >
                                 <td className="py-4 px-4">
                                   <div>
                                     <div className="font-medium text-gray-900">
                                       {assignment.reviewer.displayName}
                                     </div>
                                     <div className="text-sm text-gray-600">
-                                      {assignment.reviewer.affiliation || '單位資訊待完善'}
+                                      {assignment.reviewer.affiliation ||
+                                        '單位資訊待完善'}
                                     </div>
                                     <div className="text-xs text-gray-500 mt-1">
-                                      {assignment.reviewer.expertise && assignment.reviewer.expertise.length > 0
-                                        ? assignment.reviewer.expertise.join('、')
+                                      {assignment.reviewer.expertise &&
+                                      assignment.reviewer.expertise.length > 0
+                                        ? assignment.reviewer.expertise.join(
+                                            '、'
+                                          )
                                         : 'AR、科學教育'}
                                     </div>
                                   </div>
                                 </td>
                                 <td className="py-4 px-4 text-sm text-gray-600">
-                                  {new Date(assignment.createdAt).toLocaleDateString('zh-TW')}
+                                  {new Date(
+                                    assignment.createdAt
+                                  ).toLocaleDateString('zh-TW')}
                                 </td>
                                 <td className="py-4 px-4">
                                   <span
@@ -442,13 +605,18 @@ export default function SubmissionDetailPage() {
                                         : 'bg-gray-100 text-gray-700'
                                     }`}
                                   >
-                                    {assignment.status === 'ACCEPTED' ? '已接受' : 
-                                     assignment.status === 'DECLINED' ? '已拒絕' : '待回覆'}
+                                    {assignment.status === 'ACCEPTED'
+                                      ? '已接受'
+                                      : assignment.status === 'DECLINED'
+                                      ? '已拒絕'
+                                      : '待回覆'}
                                   </span>
                                 </td>
                                 <td className="py-4 px-4 text-sm text-gray-600">
-                                  {assignment.dueAt 
-                                    ? new Date(assignment.dueAt).toLocaleDateString('zh-TW')
+                                  {assignment.dueAt
+                                    ? new Date(
+                                        assignment.dueAt
+                                      ).toLocaleDateString('zh-TW')
                                     : '-'}
                                 </td>
                                 <td className="py-4 px-4">
@@ -461,8 +629,11 @@ export default function SubmissionDetailPage() {
                                         : 'bg-gray-100 text-gray-700'
                                     }`}
                                   >
-                                    {assignment.review?.submittedAt ? '已提交' : 
-                                     assignment.status === 'ACCEPTED' ? '待完成' : '-'}
+                                    {assignment.review?.submittedAt
+                                      ? '已提交'
+                                      : assignment.status === 'ACCEPTED'
+                                      ? '待完成'
+                                      : '-'}
                                   </span>
                                 </td>
                                 <td className="py-4 px-4 text-center">
@@ -643,22 +814,38 @@ export default function SubmissionDetailPage() {
                         </div>
                       </div>
 
+                      {/* 錯誤訊息 */}
+                      {error && (
+                        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                          <div className="text-red-700 text-sm">{error}</div>
+                        </div>
+                      )}
+
                       {/* 操作按鈕 */}
                       <div className="flex space-x-4 pt-4">
                         <button
                           onClick={() => {
                             /* 保存邏輯 */
                           }}
-                          className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                          disabled={isSubmittingDecision}
+                          className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           保存
                         </button>
 
                         <button
                           onClick={handleDecisionSubmit}
-                          className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600"
+                          disabled={isSubmittingDecision}
+                          className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                         >
-                          發送審稿結果給投稿人
+                          {isSubmittingDecision ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              提交中...
+                            </>
+                          ) : (
+                            '發送審稿結果給投稿人'
+                          )}
                         </button>
                       </div>
                     </div>
@@ -671,7 +858,6 @@ export default function SubmissionDetailPage() {
       </main>
 
       <Footer />
-
     </div>
   )
 }

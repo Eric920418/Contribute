@@ -13,6 +13,7 @@ export interface SubmissionData {
   abstract: string
   track: string
   authors: Author[]
+  conferenceId?: string
   conferenceYear?: number
   status?: SubmissionStatus
   draftId?: string // 新增：用於指定要更新的草稿ID
@@ -98,8 +99,9 @@ export interface SubmissionsResponse {
 
 export const submissionApi = {
   // 取得投稿列表
-  async getSubmissions(year?: number, status?: string): Promise<SubmissionsResponse> {
+  async getSubmissions(year?: number, status?: string, conferenceId?: string): Promise<SubmissionsResponse> {
     const params = new URLSearchParams()
+    if (conferenceId) params.append('conferenceId', conferenceId)
     if (year) params.append('year', year.toString())
     if (status) params.append('status', status)
     // 添加時間戳避免快取

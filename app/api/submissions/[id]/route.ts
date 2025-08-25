@@ -16,10 +16,39 @@ export async function GET(
 
     const { id } = await params
 
+    // 首先檢查是否是草稿
+    const draft = await prisma.draft.findFirst({
+      where: { 
+        id,
+        createdBy: session.userId
+      },
+      include: {
+        authors: true,
+        files: {
+          orderBy: { version: 'desc' }
+        },
+        conference: true
+      }
+    })
+
+    if (draft) {
+      // 轉換草稿格式以符合前端期望
+      const convertedDraft = {
+        ...draft,
+        status: 'DRAFT',
+        decisions: [],
+        reviewAssignments: [],
+        submittedAt: null
+      }
+      
+      return NextResponse.json({ submission: convertedDraft })
+    }
+
+    // 如果不是草稿，檢查正式投稿
     const submission = await prisma.submission.findUnique({
       where: { 
         id,
-        createdBy: session.userId // 確保使用者只能查看自己的投稿
+        createdBy: session.userId
       },
       include: {
         authors: true,
@@ -48,7 +77,7 @@ export async function GET(
     })
 
     if (!submission) {
-      return NextResponse.json({ error: '找不到投稿' }, { status: 404 })
+      return NextResponse.json({ error: '找不到投稿或草稿' }, { status: 404 })
     }
 
     return NextResponse.json({ submission })
@@ -87,7 +116,68 @@ export async function PUT(
       formatCheck
     } = body
 
-    // 檢查投稿是否存在且屬於當前使用者
+    // 首先檢查是否是草稿
+    const existingDraft = await prisma.draft.findFirst({
+      where: { 
+        id,
+        createdBy: session.userId
+      }
+    })
+
+    if (existingDraft) {
+      // 更新草稿
+      const updatedDraft = await prisma.$transaction(async (tx) => {
+        // 刪除舊的作者資料
+        await tx.draftAuthor.deleteMany({
+          where: { draftId: id }
+        })
+
+        // 更新草稿
+        return tx.draft.update({
+          where: { id },
+          data: {
+            title: title || '未命名草稿',
+            abstract: abstract || '',
+            track: track || '',
+            // 新增欄位
+            paperType,
+            keywords,
+            // 作者聲明
+            agreementOriginalWork: agreements?.originalWork,
+            agreementNoConflictOfInterest: agreements?.noConflictOfInterest,
+            agreementConsentToPublish: agreements?.consentToPublish,
+            // 著作權確認與格式檢查
+            copyrightPermission: copyrightPermission || null,
+            formatCheck: formatCheck || null,
+            authors: {
+              create: authors?.map((author: any) => ({
+                name: author.name || '',
+                email: author.email || '',
+                affiliation: author.institution || '',
+                isCorresponding: author.isCorresponding || false
+              })) || []
+            }
+          },
+          include: {
+            authors: true,
+            conference: true
+          }
+        })
+      })
+
+      // 為了前端兼容性，添加 status 字段
+      const result = {
+        ...updatedDraft,
+        status: 'DRAFT'
+      }
+
+      return NextResponse.json({
+        message: '草稿更新成功',
+        submission: result
+      })
+    }
+
+    // 如果不是草稿，檢查正式投稿
     const existingSubmission = await prisma.submission.findUnique({
       where: { 
         id,
@@ -96,7 +186,7 @@ export async function PUT(
     })
 
     if (!existingSubmission) {
-      return NextResponse.json({ error: '找不到投稿或無權限修改' }, { status: 404 })
+      return NextResponse.json({ error: '找不到投稿或草稿，或無權限修改' }, { status: 404 })
     }
 
     // 只有草稿狀態才能修改
@@ -171,7 +261,24 @@ export async function DELETE(
 
     const { id } = await params
 
-    // 檢查投稿是否存在且屬於當前使用者
+    // 首先檢查是否是草稿
+    const draft = await prisma.draft.findFirst({
+      where: { 
+        id,
+        createdBy: session.userId
+      }
+    })
+
+    if (draft) {
+      // 刪除草稿（Prisma 會自動處理 cascade 刪除）
+      await prisma.draft.delete({
+        where: { id }
+      })
+
+      return NextResponse.json({ message: '草稿刪除成功' })
+    }
+
+    // 如果不是草稿，檢查正式投稿
     const submission = await prisma.submission.findUnique({
       where: { 
         id,
@@ -180,7 +287,7 @@ export async function DELETE(
     })
 
     if (!submission) {
-      return NextResponse.json({ error: '找不到投稿或無權限刪除' }, { status: 404 })
+      return NextResponse.json({ error: '找不到投稿或草稿，或無權限刪除' }, { status: 404 })
     }
 
     // 只有草稿狀態才能刪除

@@ -24,16 +24,71 @@ type NavigationSource = 'home' | 'history'
 export default function AuthorPage() {
   const router = useRouter()
   const { user } = useAuth()
+  const [selectedConferenceId, setSelectedConferenceId] = useState<string>('')
   const [year, setYear] = useState(2025)
+  const [availableYears, setAvailableYears] = useState<{ value: number; label: string; id?: string }[]>([])
   const [activeTab, setActiveTab] = useState<MenuTab>('home')
   const [submissionView, setSubmissionView] = useState<SubmissionView>('list')
   const [homeView, setHomeView] = useState<HomeView>('overview')
   const [navigationSource, setNavigationSource] =
     useState<NavigationSource>('home')
 
-  // 使用真實資料
+  // 載入可用的會議年份
+  const loadAvailableYears = async () => {
+    try {
+      const response = await fetch('/api/conferences')
+      if (!response.ok) throw new Error('Failed to fetch conferences')
+      
+      const data = await response.json()
+      const { conferences } = data
+      
+      if (conferences && conferences.length > 0) {
+        const years = conferences.map((conf: any) => ({
+          value: conf.year,
+          label: conf.title || `${conf.year} 課程教學與傳播科技研討會`,
+          id: conf.id
+        })).sort((a: any, b: any) => b.value - a.value)
+        
+        setAvailableYears(years)
+        
+        // 設定初始選中的會議
+        if (years.length > 0) {
+          if (!selectedConferenceId || !years.some((y: any) => y.id === selectedConferenceId)) {
+            setSelectedConferenceId(years[0].id || `year-${years[0].value}`)
+            setYear(years[0].value)
+          }
+        }
+      } else {
+        // 沒有會議時的預設值
+        const currentYear = new Date().getFullYear()
+        const defaultYears = [
+          { value: currentYear, label: `${currentYear} 課程教學與傳播科技研討會`, id: `default-${currentYear}` }
+        ]
+        setAvailableYears(defaultYears)
+        
+        if (!selectedConferenceId) {
+          setSelectedConferenceId(defaultYears[0].id)
+          setYear(defaultYears[0].value)
+        }
+      }
+    } catch (error) {
+      console.error('載入會議列表失敗:', error)
+      // 使用預設會議
+      const currentYear = new Date().getFullYear()
+      const defaultYears = [
+        { value: currentYear, label: `${currentYear} 課程教學與傳播科技研討會`, id: `default-${currentYear}` }
+      ]
+      setAvailableYears(defaultYears)
+    }
+  }
+
+  useEffect(() => {
+    loadAvailableYears()
+  }, [])
+
+  // 使用真實資料 - 傳入會議ID以確保獲取正確會議的投稿
   const { submissions, stats, conference, loading, error, refetch } =
-    useSubmissions(year)
+    useSubmissions(year, undefined, selectedConferenceId)
   const {
     saveDraft: saveSubmissionDraft,
     submitSubmission,
@@ -86,6 +141,7 @@ export default function AuthorPage() {
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isEditingDraft, setIsEditingDraft] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   
   // 檔案上傳狀態
   const [uploadingFiles, setUploadingFiles] = useState(false)
@@ -199,6 +255,7 @@ export default function AuthorPage() {
             institution: author.institution,
             isCorresponding: author.isCorresponding,
           })),
+          conferenceId: selectedConferenceId,
           conferenceYear: year,
         }
 
@@ -239,6 +296,10 @@ export default function AuthorPage() {
       setErrors({})
       setIsEditingDraft(true) // 進入投稿模式，顯示步驟
 
+      // 清空檔案上傳狀態
+      setUploadedFiles({})
+      setCurrentSubmissionId('')
+
       // 清除本地草稿緩存
       localStorage.removeItem('submissionDraft')
 
@@ -258,10 +319,37 @@ export default function AuthorPage() {
     { value: 'technical', label: '技術報告' },
   ]
 
-  const CONFERENCE_SUBJECTS = conference?.tracks
+  // 根據選中的會議獲取其tracks作為會議子題選項
+  const selectedConference = availableYears.find(conf => conf.id === selectedConferenceId)
+  const [selectedConferenceData, setSelectedConferenceData] = useState<any>(null)
+
+  useEffect(() => {
+    // 當選中會議時，獲取該會議的詳細資料
+    const loadSelectedConferenceData = async () => {
+      if (selectedConferenceId && selectedConferenceId !== `default-${year}`) {
+        try {
+          const response = await fetch(`/api/conferences?conferenceId=${selectedConferenceId}`)
+          if (response.ok) {
+            const data = await response.json()
+            setSelectedConferenceData(data)
+          }
+        } catch (error) {
+          console.error('載入選中會議資料失敗:', error)
+        }
+      }
+    }
+    loadSelectedConferenceData()
+  }, [selectedConferenceId])
+
+  const CONFERENCE_SUBJECTS = selectedConferenceData?.tracks
+    ? Object.entries(selectedConferenceData.tracks).map(([value, label]) => ({
+        value,
+        label: typeof label === 'string' ? label : value,
+      }))
+    : conference?.tracks
     ? Object.entries(conference.tracks).map(([value, label]) => ({
         value,
-        label,
+        label: typeof label === 'string' ? label : value,
       }))
     : [
         { value: 'ai_education', label: 'AI在教育中的應用' },
@@ -487,40 +575,58 @@ export default function AuthorPage() {
     try {
       // 如果沒有投稿ID，先創建草稿
       let submissionId = currentSubmissionId
+      console.log('檔案上傳開始 - currentSubmissionId:', currentSubmissionId)
+      
       if (!submissionId) {
+        console.log('沒有 submissionId，創建新草稿...')
+        const draftPayload = {
+          title: submissionData.title || '未命名稿件',
+          abstract: submissionData.abstract || '',
+          track: submissionData.conferenceSubject || '',
+          paperType: submissionData.paperType || '',
+          keywords: submissionData.keywords || '',
+          authors: submissionData.authors.filter(author => author.name.trim()),
+          status: 'DRAFT'
+        }
+        console.log('草稿 payload:', draftPayload)
+        
         const draftResponse = await fetch('/api/submissions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            title: submissionData.title || '未命名稿件',
-            abstract: submissionData.abstract || '',
-            track: submissionData.conferenceSubject || '',
-            paperType: submissionData.paperType || '',
-            keywords: submissionData.keywords || '',
-            authors: submissionData.authors.filter(author => author.name.trim()),
-            status: 'DRAFT'
-          }),
+          body: JSON.stringify(draftPayload),
         })
 
         if (!draftResponse.ok) {
-          throw new Error('創建草稿失敗')
+          const errorData = await draftResponse.json()
+          console.error('創建草稿失敗:', errorData)
+          throw new Error('創建草稿失敗: ' + (errorData.error || '未知錯誤'))
         }
 
         const draftData = await draftResponse.json()
+        console.log('草稿創建成功:', draftData)
         submissionId = draftData.submission.id
+        console.log('獲得的 submissionId:', submissionId)
         setCurrentSubmissionId(submissionId)
       }
+      
+      console.log('最終用於上傳的 submissionId:', submissionId)
 
       const uploadResults: any = {}
 
       // 只上傳匿名稿件（如果選擇了且尚未上傳）
       if (hasManuscriptToUpload) {
+        console.log('準備上傳匿名稿件，submissionId:', submissionId)
         const manuscriptFormData = new FormData()
         manuscriptFormData.append('submissionId', submissionId || '')
         manuscriptFormData.append('fileType', 'MANUSCRIPT_ANONYMOUS')
         manuscriptFormData.append('file', submissionData.manuscriptFile!)
+        
+        console.log('FormData 內容:')
+        console.log('- submissionId:', manuscriptFormData.get('submissionId'))
+        console.log('- fileType:', manuscriptFormData.get('fileType'))
+        console.log('- file:', (manuscriptFormData.get('file') as File)?.name)
 
         const manuscriptResponse = await fetch('/api/submissions/upload', {
           method: 'POST',
@@ -796,6 +902,7 @@ export default function AuthorPage() {
           institution: author.institution.trim(),
           isCorresponding: author.isCorresponding || false,
         })),
+        conferenceId: selectedConferenceId,
         conferenceYear: year,
         // 新增完整欄位
         paperType: submissionData.paperType || '',
@@ -903,12 +1010,21 @@ export default function AuthorPage() {
   }
 
   const handleSubmit = async () => {
+    // 防止重複提交
+    if (isSubmitting) {
+      console.log('正在提交中，請勿重複點擊')
+      return
+    }
+
     try {
+      setIsSubmitting(true)
+      
       // 驗證所有步驟
       const allStepsValid = [1, 2, 3, 4, 5].every(step => validateStep(step))
 
       if (!allStepsValid) {
         alert('請完成所有必填欄位後再提交')
+        setIsSubmitting(false)
         return
       }
 
@@ -946,6 +1062,7 @@ export default function AuthorPage() {
           institution: author.institution,
           isCorresponding: author.isCorresponding,
         })),
+        conferenceId: selectedConferenceId,
         conferenceYear: year,
         draftId: existingDraftId, // 如果找到對應草稿，使用其ID
       }
@@ -1000,6 +1117,8 @@ export default function AuthorPage() {
       refetch()
     } catch (err: any) {
       alert('提交稿件失敗: ' + err.message)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -1084,14 +1203,15 @@ export default function AuthorPage() {
       
       if (latestSubmission.files && latestSubmission.files.length > 0) {
         latestSubmission.files.forEach((file: any) => {
-          if (file.kind === 'MANUSCRIPT_ANONYMOUS') {
+          // 只有在檔案資訊完整時才添加到 restoredFiles
+          if (file.kind === 'MANUSCRIPT_ANONYMOUS' && file.id && file.originalName) {
             restoredFiles.manuscriptFile = {
               id: file.id,
               originalName: file.originalName,
               size: file.size || 0,
               version: file.version
             }
-          } else if (file.kind === 'TITLE_PAGE') {
+          } else if (file.kind === 'TITLE_PAGE' && file.id && file.originalName) {
             restoredFiles.titlePageFile = {
               id: file.id,
               originalName: file.originalName,
@@ -1100,9 +1220,9 @@ export default function AuthorPage() {
             }
           }
         })
-      } else {
       }
       
+      // 只有在有有效檔案時才設置，否則保持空物件
       setUploadedFiles(restoredFiles)
 
       // 檢查檔案狀態並清理過時的 localStorage 資訊
@@ -2524,7 +2644,9 @@ export default function AuthorPage() {
                             </tr>
                           </thead>
                           <tbody className="text-gray-700">
-                            {Object.entries(uploadedFiles).map(([fileType, fileInfo], index) => (
+                            {Object.entries(uploadedFiles)
+                              .filter(([fileType, fileInfo]) => fileInfo && fileInfo.id && fileInfo.originalName)
+                              .map(([fileType, fileInfo], index) => (
                               <tr key={fileType} className="border-b border-gray-100">
                                 <td className="px-[30px] py-[60px] text-sm w-24">{index + 1}</td>
                                 <td className="px-[48px] py-[62px] text-blue-600 underline cursor-pointer text-sm"
@@ -2590,40 +2712,6 @@ export default function AuthorPage() {
                                             // 重新載入submissions列表以獲取最新狀態
                                             await refetch()
                                             
-                                            // 強制更新當前的 submission 狀態
-                                            if (currentSubmissionId) {
-                                              try {
-                                                const response = await fetch(`/api/submissions/${currentSubmissionId}?_t=${Date.now()}`)
-                                                if (response.ok) {
-                                                  const data = await response.json()
-                                                  
-                                                  // 強制更新檔案狀態
-                                                  const latestFiles: any = {}
-                                                  if (data.submission.files && data.submission.files.length > 0) {
-                                                    data.submission.files.forEach((file: any) => {
-                                                      if (file.kind === 'MANUSCRIPT_ANONYMOUS') {
-                                                        latestFiles.manuscriptFile = {
-                                                          id: file.id,
-                                                          originalName: file.originalName,
-                                                          size: file.size || 0,
-                                                          version: file.version
-                                                        }
-                                                      } else if (file.kind === 'TITLE_PAGE') {
-                                                        latestFiles.titlePageFile = {
-                                                          id: file.id,
-                                                          originalName: file.originalName,
-                                                          size: file.size || 0,
-                                                          version: file.version
-                                                        }
-                                                      }
-                                                    })
-                                                  }
-                                                  setUploadedFiles(latestFiles)
-                                                }
-                                              } catch (error) {
-                                              }
-                                            }
-                                            
                                           } catch (error) {
                                             alert('檔案刪除失敗: ' + (error instanceof Error ? error.message : '未知錯誤'))
                                           }
@@ -2639,7 +2727,7 @@ export default function AuthorPage() {
                                 </td>
                               </tr>
                             ))}
-                            {Object.keys(uploadedFiles).length === 0 && (
+                            {Object.entries(uploadedFiles).filter(([fileType, fileInfo]) => fileInfo && fileInfo.id && fileInfo.originalName).length === 0 && (
                               <tr className="border-b border-gray-100">
                                 <td colSpan={6} className="px-[30px] py-[60px] text-center text-sm text-gray-500">
                                   尚未上傳任何檔案
@@ -2658,7 +2746,8 @@ export default function AuthorPage() {
                       <hr className="border-gray-200" />
                       
                       {/* 檔案已存在提示 */}
-                      {Object.keys(uploadedFiles).length > 0 && (
+                      {((uploadedFiles.manuscriptFile && uploadedFiles.manuscriptFile.originalName) || 
+                        (uploadedFiles.titlePageFile && uploadedFiles.titlePageFile.originalName)) && (
                         <div className="p-6 bg-blue-50 border-b border-gray-200">
                           <div className="flex items-center gap-3">
                             <div className="w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
@@ -2670,9 +2759,10 @@ export default function AuthorPage() {
                               <p className="text-blue-800 font-medium">部分稿件已上傳</p>
                               <p className="text-blue-600 text-sm">
                                 已上傳：
-                                {uploadedFiles.manuscriptFile && ' 匿名稿件'}
-                                {uploadedFiles.manuscriptFile && uploadedFiles.titlePageFile && '、'}
-                                {uploadedFiles.titlePageFile && ' 標題頁面'}
+                                {uploadedFiles.manuscriptFile && uploadedFiles.manuscriptFile.originalName && ' 匿名稿件'}
+                                {uploadedFiles.manuscriptFile && uploadedFiles.manuscriptFile.originalName && 
+                                 uploadedFiles.titlePageFile && uploadedFiles.titlePageFile.originalName && '、'}
+                                {uploadedFiles.titlePageFile && uploadedFiles.titlePageFile.originalName && ' 標題頁面'}
                                 。如需重新上傳特定檔案，請在「稿件管理」區塊刪除對應檔案。
                               </p>
                             </div>
@@ -3718,9 +3808,14 @@ export default function AuthorPage() {
                 ) : (
                   <button
                     onClick={handleSubmit}
-                    className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                    disabled={isSubmitting}
+                    className={`px-6 py-2 text-white rounded-lg transition-colors ${
+                      isSubmitting 
+                        ? 'bg-gray-400 cursor-not-allowed' 
+                        : 'bg-green-600 hover:bg-green-700'
+                    }`}
                   >
-                    提交稿件
+                    {isSubmitting ? '提交中...' : '提交稿件'}
                   </button>
                 )}
               </div>
@@ -3829,18 +3924,22 @@ export default function AuthorPage() {
               <div className="relative z-[10] bg-white flex-1 px-6 md:px-[48px] py-6 md:py-[45px] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div className="flex-1">
                   <h1 className="text-lg md:text-[28px] font-medium text-[#3B5FB9] leading-tight">
-                    2025 AI時代課程教學與傳播科技研討會
+                    {(() => {
+                      // 根據選中的會議ID找到對應的會議標題
+                      const selectedConference = availableYears.find(conf => conf.id === selectedConferenceId)
+                      return selectedConference?.label || conference?.title || `${year} AI時代課程教學與傳播科技研討會`
+                    })()}
                   </h1>
                 </div>
                 <div className="relative z-[70]">
                   <YearDropdown
-                    value={2025}
-                    onChange={setYear}
-                    options={[
-                      { value: 2025, label: '2025' },
-                      { value: 2024, label: '2024' },
-                      { value: 2023, label: '2023' },
-                    ]}
+                    value={year}
+                    selectedId={selectedConferenceId}
+                    onChange={(conferenceId, selectedYear) => {
+                      setSelectedConferenceId(conferenceId)
+                      setYear(selectedYear)
+                    }}
+                    options={availableYears}
                   />
                 </div>
               </div>

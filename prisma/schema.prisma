@@ -28,6 +28,7 @@ model User {
 
   // 關聯
   roles                UserRole[]
+  draftsCreated        Draft[]             @relation("DraftCreatedBy")
   submissionsCreated   Submission[]        @relation("SubmissionCreatedBy")
   reviewAssignments    ReviewAssignment[]
   decisionsCreated     Decision[]          @relation("DecisionCreatedBy")
@@ -75,20 +76,89 @@ model Conference {
   updatedAt DateTime @updatedAt
   
   // 關聯
+  drafts      Draft[]
   submissions Submission[]
   
-  @@unique([year])
   @@map("conferences")
 }
 
-// 投稿表
+// 草稿表 - 只有作者能看到的草稿
+model Draft {
+  id           String    @id @default(cuid())
+  conferenceId String
+  title        String
+  abstract     String    @db.Text
+  track        String
+  createdBy    String
+  
+  // 新增欄位
+  paperType    String?   // 論文類型：研究論文、案例研究、工具論文等
+  keywords     String?   @db.Text // 關鍵詞
+  
+  // 作者聲明
+  agreementOriginalWork         Boolean? @default(false) // 原創作品聲明
+  agreementNoConflictOfInterest Boolean? @default(false) // 無利益衝突聲明
+  agreementConsentToPublish     Boolean? @default(false) // 發表同意書
+  
+  // 著作權確認與格式檢查
+  copyrightPermission           String?  // 著作權授權確認：yes/no
+  formatCheck                   String?  // 格式檢查確認：yes/no
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // 關聯
+  conference Conference    @relation(fields: [conferenceId], references: [id], onDelete: Cascade)
+  creator    User          @relation("DraftCreatedBy", fields: [createdBy], references: [id])
+  authors    DraftAuthor[]
+  files      DraftFileAsset[]
+  
+  @@map("drafts")
+}
+
+// 草稿作者表
+model DraftAuthor {
+  id             String  @id @default(cuid())
+  draftId        String
+  name           String
+  email          String
+  affiliation    String
+  isCorresponding Boolean @default(false)
+  
+  // 關聯
+  draft Draft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  
+  @@map("draft_authors")
+}
+
+// 草稿檔案資產表
+model DraftFileAsset {
+  id           String        @id @default(cuid())
+  draftId      String
+  kind         FileAssetKind
+  version      Int           @default(1)
+  path         String
+  originalName String
+  size         Int
+  mimeType     String
+  checksum     String
+  
+  createdAt DateTime @default(now())
+  
+  // 關聯
+  draft Draft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  
+  @@map("draft_file_assets")
+}
+
+// 投稿表 - 只存放正式提交的投稿（不含草稿）
 model Submission {
   id           String           @id @default(cuid())
   conferenceId String
   title        String
   abstract     String           @db.Text
   track        String
-  status       SubmissionStatus @default(DRAFT)
+  status       SubmissionStatus @default(SUBMITTED) // 移除 DRAFT 預設值
   createdBy    String
   decisionNote String?          @db.Text
   serialNumber String?          @unique // 流水號

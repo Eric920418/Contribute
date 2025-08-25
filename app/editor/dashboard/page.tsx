@@ -9,6 +9,7 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute'
 import { apiClient } from '@/lib/api/client'
 import YearDropdown from '@/components/ui/YearDropdown'
 import { SessionData } from '@/lib/auth/session'
+import { useAuth } from '@/hooks/useAuth'
 
 interface EditorAssignment {
   id: string
@@ -150,6 +151,9 @@ const getRoleText = (role: string) => {
 }
 
 export default function EditorDashboard() {
+  // 使用現有的權限檢查 hook
+  const { user: authUser, hasRole, hasAnyRole, loading: authLoading } = useAuth()
+  
   const router = useRouter()
   const [assignments, setAssignments] = useState<EditorAssignment[]>([])
   const [stats, setStats] = useState<EditorStats>({
@@ -163,7 +167,9 @@ export default function EditorDashboard() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState<'all' | 'submitted' | 'under_review' | 'revision_required' | 'accepted' | 'rejected'>('all')
+  const [selectedConferenceId, setSelectedConferenceId] = useState<string>('')
   const [year, setYear] = useState(2025)
+  const [availableYears, setAvailableYears] = useState<{ value: number; label: string; id?: string }[]>([])
   const [conference, setConference] = useState<{
     year: number
     title: string
@@ -171,6 +177,30 @@ export default function EditorDashboard() {
     settings?: Record<string, any>
     isActive?: boolean
   } | null>(null)
+  
+  // 會議列表相關狀態
+  const [conferenceList, setConferenceList] = useState<{
+    id: string
+    year: number
+    title: string
+    subtopics: string[]
+    isActive: boolean
+  }[]>([])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [conferenceCurrentPage, setConferenceCurrentPage] = useState(1)
+  const [conferencesPerPage] = useState(10)
+  
+  // 會議編輯相關狀態
+  const [showEditConferenceModal, setShowEditConferenceModal] = useState(false)
+  const [showAddConferenceModal, setShowAddConferenceModal] = useState(false)
+  const [editingConference, setEditingConference] = useState<{
+    id: string
+    year: number
+    title: string
+    subtopics: string[]
+    isActive: boolean
+  } | null>(null)
+  const [newConferenceSubtopics, setNewConferenceSubtopics] = useState<string[]>([''])
   const [manuscriptPage, setManuscriptPage] = useState(1)
   const [manuscriptPagination, setManuscriptPagination] = useState({
     total: 0,
@@ -217,6 +247,35 @@ export default function EditorDashboard() {
     role: 'REVIEWER' as 'CHIEF_EDITOR' | 'EDITOR' | 'REVIEWER'
   })
   const [isAddingMember, setIsAddingMember] = useState(false)
+
+  // 編輯人員相關狀態
+  const [showEditMemberModal, setShowEditMemberModal] = useState(false)
+  const [editingMember, setEditingMember] = useState<Member | null>(null)
+  const [editMemberData, setEditMemberData] = useState({
+    name: '',
+    email: '',
+    affiliation: '',
+    position: '',
+    orcidId: '',
+    expertise: [] as string[],
+    role: 'REVIEWER' as 'CHIEF_EDITOR' | 'EDITOR' | 'REVIEWER'
+  })
+
+  // 審稿紀錄相關狀態
+  const [showReviewHistoryModal, setShowReviewHistoryModal] = useState(false)
+  const [reviewHistoryMember, setReviewHistoryMember] = useState<Member | null>(null)
+  const [reviewHistoryData, setReviewHistoryData] = useState<any[]>([])
+  const [loadingReviewHistory, setLoadingReviewHistory] = useState(false)
+  const [isEditingMember, setIsEditingMember] = useState(false)
+
+  // 決議模態視窗相關狀態
+  const [showDecisionModal, setShowDecisionModal] = useState(false)
+  const [currentDecisionSubmissionId, setCurrentDecisionSubmissionId] = useState<string | null>(null)
+  const [decisionData, setDecisionData] = useState({
+    decision: '',
+    note: ''
+  })
+  const [isMakingDecision, setIsMakingDecision] = useState(false)
 
   // 專業知識領域選項
   const expertiseOptions = [
@@ -320,42 +379,119 @@ export default function EditorDashboard() {
   // 人員管理操作函數
   const handleEditMember = async (memberId: string) => {
     try {
-      // 這裡可以開啟編輯成員的模態視窗或跳轉到編輯頁面
-      alert(`編輯成員功能開發中... (ID: ${memberId})`)
+      console.log('handleEditMember called with memberId:', memberId)
+      // 找到要編輯的成員
+      const memberToEdit = members.find(member => member.id === memberId)
+      console.log('memberToEdit found:', memberToEdit)
+      if (!memberToEdit) {
+        setError('找不到要編輯的成員')
+        return
+      }
+
+      // 設置編輯狀態
+      setEditingMember(memberToEdit)
+      console.log('setEditingMember called')
+      setEditMemberData({
+        name: memberToEdit.name,
+        email: memberToEdit.email,
+        affiliation: memberToEdit.affiliation,
+        position: memberToEdit.position,
+        orcidId: memberToEdit.orcidId || '',
+        expertise: memberToEdit.expertise,
+        role: memberToEdit.role
+      })
+      console.log('setEditMemberData called')
+      setShowEditMemberModal(true)
+      console.log('setShowEditMemberModal(true) called')
     } catch (error: any) {
+      console.error('Error in handleEditMember:', error)
       setError('編輯成員失敗: ' + (error.response?.data?.error || error.message))
     }
   }
 
-  const handleToggleMemberStatus = async (memberId: string, currentStatus: string) => {
+  // 處理審稿紀錄
+  const handleReviewHistory = async (memberId: string) => {
     try {
-      const action = currentStatus === 'enabled' ? 'disable' : 'enable'
-      const actionText = action === 'enable' ? '啟用' : '停用'
-      
-      if (confirm(`確定要${actionText}這位成員嗎？`)) {
-        // 調用實際的API
-        const response = await apiClient.patch(`/editor/members/${memberId}/status`, { action })
-        
-        if (response.data.success) {
-          // 更新本地狀態
-          setMembers(prevMembers => 
-            prevMembers.map(member => 
-              member.id === memberId 
-                ? { ...member, status: response.data.status as 'enabled' | 'pending_activation' | 'not_sent' }
-                : member
-            )
-          )
-          
-          alert(response.data.message)
-        } else {
-          throw new Error(response.data.error || '操作失敗')
-        }
+      console.log('handleReviewHistory called with memberId:', memberId)
+      // 找到對應的成員
+      const member = members.find(m => m.id === memberId)
+      if (!member) {
+        setError('找不到對應的成員')
+        return
       }
+
+      // 設置審稿紀錄狀態
+      setReviewHistoryMember(member)
+      setShowReviewHistoryModal(true)
+      setLoadingReviewHistory(true)
+
+      console.log('Opening review history for member:', member.name)
+      
+      // 載入審稿紀錄數據
+      await loadReviewHistoryData(memberId)
+      
     } catch (error: any) {
-      console.error('更新成員狀態失敗:', error)
-      setError('更新成員狀態失敗: ' + (error.response?.data?.error || error.message))
+      console.error('Error in handleReviewHistory:', error)
+      setError('查看審稿紀錄失敗: ' + (error.message || '未知錯誤'))
+      setLoadingReviewHistory(false)
     }
   }
+
+  // 載入審稿紀錄數據
+  const loadReviewHistoryData = async (memberId: string) => {
+    try {
+      console.log('Loading review history for member:', memberId)
+      
+      // 調用真實的API
+      const response = await apiClient.get(`/editor/members/${memberId}/review-history`)
+      
+      if (response.data.success) {
+        // 格式化API回傳的數據，轉換為前端需要的格式
+        const formattedData = response.data.data.map((record: any) => ({
+          id: record.id,
+          submissionTitle: record.submissionTitle,
+          authors: record.authors,
+          conferenceYear: record.conferenceYear,
+          track: record.track,
+          submittedDate: record.submittedDate,
+          reviewedDate: record.reviewedDate,
+          assignedDate: record.assignedDate,
+          dueDate: record.dueDate,
+          status: record.status,
+          submissionStatus: record.submissionStatus,
+          // 處理審稿評論
+          review: record.review,
+          // 為了相容現有UI，保留舊的欄位名稱
+          decision: record.review?.recommendation === 'ACCEPT' ? 'accepted' :
+                   record.review?.recommendation === 'MINOR_REVISION' || record.review?.recommendation === 'MAJOR_REVISION' ? 'revision_required' :
+                   record.review?.recommendation === 'REJECT' ? 'rejected' : 
+                   record.status === 'PENDING' ? 'pending' : 'in_progress',
+          comments: record.review?.commentToEditor || record.review?.commentToAuthor || ''
+        }))
+        
+        setReviewHistoryData(formattedData)
+        console.log('Review history loaded successfully:', formattedData.length, 'records')
+      } else {
+        console.error('API returned error:', response.data.error)
+        setError('載入審稿紀錄失敗: ' + response.data.error)
+        setReviewHistoryData([])
+      }
+    } catch (error: any) {
+      console.error('Error loading review history:', error)
+      setError('載入審稿紀錄失敗: ' + (error.message || '未知錯誤'))
+    } finally {
+      setLoadingReviewHistory(false)
+    }
+  }
+
+  // 關閉審稿紀錄模態視窗
+  const handleCloseReviewHistoryModal = () => {
+    setShowReviewHistoryModal(false)
+    setReviewHistoryMember(null)
+    setReviewHistoryData([])
+  }
+
+ 
 
   const handleDeleteMember = async (memberId: string) => {
     try {
@@ -445,9 +581,85 @@ export default function EditorDashboard() {
     setError('')
   }
 
+  // 編輯人員相關函數
+  const handleUpdateMember = async () => {
+    if (!editMemberData.name.trim() || !editMemberData.email.trim() || !editMemberData.affiliation.trim()) {
+      setError('請填寫姓名、信箱和服務單位與職稱')
+      return
+    }
+
+    if (editMemberData.expertise.length === 0) {
+      setError('請至少選擇一個專業知識領域')
+      return
+    }
+
+    if (!editingMember) {
+      setError('找不到要編輯的成員')
+      return
+    }
+
+    setIsEditingMember(true)
+    setError('')
+
+    try {
+      const response = await fetch(`/api/editor/members/${editingMember.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(editMemberData)
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || '更新人員失敗')
+      }
+
+      const result = await response.json()
+
+      // 重新載入人員數據
+      await loadMembersData(memberPage, memberSearch, memberFilter)
+      
+      // 關閉模態視窗
+      handleCloseEditMemberModal()
+      
+      alert('成功更新人員資料')
+      
+    } catch (error: any) {
+      setError('更新人員失敗: ' + (error instanceof Error ? error.message : '未知錯誤'))
+    } finally {
+      setIsEditingMember(false)
+    }
+  }
+
+  const handleCloseEditMemberModal = () => {
+    setShowEditMemberModal(false)
+    setEditingMember(null)
+    setEditMemberData({
+      name: '',
+      email: '',
+      affiliation: '',
+      position: '',
+      orcidId: '',
+      expertise: [],
+      role: 'REVIEWER'
+    })
+    setError('')
+  }
+
   // 處理專業領域選擇
   const handleExpertiseToggle = (field: string) => {
     setNewMemberData(prev => ({
+      ...prev,
+      expertise: prev.expertise.includes(field)
+        ? prev.expertise.filter(item => item !== field)
+        : [...prev.expertise, field]
+    }))
+  }
+
+  // 處理編輯時的專業領域選擇
+  const handleEditExpertiseToggle = (field: string) => {
+    setEditMemberData(prev => ({
       ...prev,
       expertise: prev.expertise.includes(field)
         ? prev.expertise.filter(item => item !== field)
@@ -514,19 +726,186 @@ export default function EditorDashboard() {
 
   // 載入會議資料
   const loadConference = async (conferenceYear: number) => {
+    console.log('正在載入年份會議資料:', conferenceYear)
     try {
-      const response = await apiClient.get(`/api/conferences?year=${conferenceYear}`)
-      setConference(response.data)
-    } catch (error) {
+      // 嘗試使用原生 fetch
+      const fetchResponse = await fetch(`/api/conferences?year=${conferenceYear}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+      })
+      
+      console.log('會議資料 Fetch 回應狀態:', fetchResponse.status)
+      console.log('會議資料 Fetch 回應 URL:', fetchResponse.url)
+      
+      if (!fetchResponse.ok) {
+        throw new Error(`HTTP error! status: ${fetchResponse.status}`)
+      }
+      
+      const data = await fetchResponse.json()
+      console.log('會議資料載入成功 (使用 fetch):', data)
+      setConference(data)
+    } catch (error: any) {
       console.error('取得會議資料失敗:', error)
+      console.error('錯誤詳情:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        url: error.config?.url,
+        message: error.message
+      })
+      
       // 如果 API 失敗，使用預設值
-      setConference({
+      const defaultConference = {
         year: conferenceYear,
         title: `${conferenceYear} AI時代課程教學與傳播科技研討會`,
-        tracks: {},
-        settings: {},
+        tracks: {
+          'ai_education': 'AI在教育中的應用',
+          'digital_learning': '數位學習與教學科技',
+          'curriculum_design': '課程設計與開發',
+          'assessment': '學習評量與分析',
+          'media_technology': '傳播科技與媒體素養',
+          'teacher_training': '教師專業發展'
+        },
+        settings: {
+          submissionDeadline: `${conferenceYear}-12-31`,
+          reviewDeadline: `${conferenceYear + 1}-02-28`,
+          notificationDate: `${conferenceYear + 1}-03-15`,
+          conferenceDate: `${conferenceYear + 1}-05-15`
+        },
         isActive: false
+      }
+      console.log('使用預設會議資料:', defaultConference)
+      setConference(defaultConference)
+    }
+  }
+
+  // 載入所有可用的會議年份
+  const loadAvailableYears = async () => {
+    console.log('正在載入可用年份列表...')
+    console.log('API client 基礎 URL:', apiClient.defaults.baseURL)
+    console.log('當前 window.location:', typeof window !== 'undefined' ? window.location.href : 'server-side')
+    try {
+      // 嘗試使用原生 fetch 而不是 axios
+      console.log('嘗試使用 fetch API...')
+      const fetchResponse = await fetch('/api/conferences', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // 包含 cookies
       })
+      
+      console.log('Fetch 回應狀態:', fetchResponse.status)
+      console.log('Fetch 回應 URL:', fetchResponse.url)
+      
+      if (!fetchResponse.ok) {
+        throw new Error(`HTTP error! status: ${fetchResponse.status}`)
+      }
+      
+      const data = await fetchResponse.json()
+      console.log('年份列表載入成功 (使用 fetch):', data)
+      const { conferences } = data
+      
+      if (conferences && conferences.length > 0) {
+        // 每個會議都作為獨立選項，使用會議ID作為唯一標識
+        const years = conferences.map((conf: any) => ({
+          value: conf.year,
+          label: conf.title || `${conf.year} 課程教學與傳播科技研討會`,
+          id: conf.id // 添加唯一ID
+        })).sort((a: any, b: any) => b.value - a.value) // 降序排列，最新年份在前
+        
+        setAvailableYears(years)
+        
+        // 設定初始選中的會議（如果沒有選中任何會議，選擇第一個）
+        if (years.length > 0) {
+          if (!selectedConferenceId || !years.some((y: any) => y.id === selectedConferenceId)) {
+            setSelectedConferenceId(years[0].id || `year-${years[0].value}`)
+            setYear(years[0].value)
+          }
+        }
+      } else {
+        // 沒有資料庫會議資料時的預設年份
+        const currentYear = new Date().getFullYear()
+        const defaultYears = [
+          { value: currentYear, label: `${currentYear} 課程教學與傳播科技研討會`, id: `default-${currentYear}` },
+          { value: currentYear - 1, label: `${currentYear - 1} 課程教學與傳播科技研討會`, id: `default-${currentYear - 1}` },
+          { value: currentYear - 2, label: `${currentYear - 2} 課程教學與傳播科技研討會`, id: `default-${currentYear - 2}` }
+        ]
+        setAvailableYears(defaultYears)
+        
+        // 設定預設選中的會議
+        if (!selectedConferenceId) {
+          setSelectedConferenceId(defaultYears[0].id)
+          setYear(defaultYears[0].value)
+        }
+      }
+    } catch (error: any) {
+      console.error('取得會議年份列表失敗:', error)
+      console.error('錯誤詳情:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        url: error.config?.url
+      })
+      
+      // API 失敗時的預設年份
+      const currentYear = new Date().getFullYear()
+      const defaultYears = [
+        { value: currentYear, label: currentYear.toString() },
+        { value: currentYear - 1, label: (currentYear - 1).toString() },
+        { value: currentYear - 2, label: (currentYear - 2).toString() }
+      ]
+      setAvailableYears(defaultYears)
+    }
+  }
+
+  // 載入會議列表
+  const loadConferenceList = async () => {
+    try {
+      console.log('正在載入會議列表...')
+      const response = await fetch('/api/conferences')
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const data = await response.json()
+      console.log('API 回傳的會議資料:', data)
+      
+      if (data.conferences && data.conferences.length > 0) {
+        // 轉換 API 資料格式成前端需要的格式
+        const formattedConferences = data.conferences.map((conf: any, index: number) => ({
+          id: conf.id || (index + 1).toString(),
+          year: conf.year,
+          title: conf.title,
+          subtopics: conf.tracks 
+            ? Object.values(conf.tracks).filter(track => typeof track === 'string') 
+            : ['未設定子題'],
+          isActive: conf.isActive || false
+        }))
+        
+        console.log('格式化後的會議列表:', formattedConferences)
+        setConferenceList(formattedConferences)
+      } else {
+        console.log('沒有會議資料，使用預設列表')
+        // 如果沒有資料，使用一些預設會議
+        const defaultConferences = [
+          { id: '1', year: 2025, title: '2025 課程教學與傳播科技研討會', subtopics: ['人工智慧與教育融合', '教育中的生成式人工智慧應用'], isActive: true },
+          { id: '2', year: 2024, title: '2024 課程教學與傳播科技研討會', subtopics: ['永續與互動科技', 'K-12 教育中的程式設計教學'], isActive: true },
+          { id: '3', year: 2023, title: '2023 課程教學與傳播科技研討會', subtopics: ['虛擬與擴增實境在課室教學中的實踐', '教育資料分析與學習行為預測'], isActive: true }
+        ]
+        setConferenceList(defaultConferences)
+      }
+    } catch (error: any) {
+      console.error('載入會議列表失敗:', error)
+      // 發生錯誤時也提供預設會議列表
+      const defaultConferences = [
+        { id: '1', year: 2025, title: '2025 課程教學與傳播科技研討會', subtopics: ['人工智慧與教育融合', '教育中的生成式人工智慧應用'], isActive: true },
+        { id: '2', year: 2024, title: '2024 課程教學與傳播科技研討會', subtopics: ['永續與互動科技', 'K-12 教育中的程式設計教學'], isActive: true },
+        { id: '3', year: 2023, title: '2023 課程教學與傳播科技研討會', subtopics: ['虛擬與擴增實境在課室教學中的實踐', '教育資料分析與學習行為預測'], isActive: true }
+      ]
+      setConferenceList(defaultConferences)
     }
   }
 
@@ -545,7 +924,12 @@ export default function EditorDashboard() {
       
       // 獲取編輯投稿列表
       const params = new URLSearchParams()
-      params.append('year', year.toString())
+      // 如果有選中的會議ID，使用會議ID查詢，否則使用年份
+      if (selectedConferenceId) {
+        params.append('conferenceId', selectedConferenceId)
+      } else {
+        params.append('year', year.toString())
+      }
       params.append('page', page.toString())
       params.append('limit', '10')
       if (filter !== 'all') {
@@ -597,10 +981,22 @@ export default function EditorDashboard() {
   }
 
   useEffect(() => {
-    setManuscriptPage(1) // 當年份或篩選改變時重置頁數
+    setManuscriptPage(1) // 當會議或篩選改變時重置頁數
     loadData(1)
     loadConference(year) // 載入會議資料
-  }, [year, filter])
+  }, [year, filter, selectedConferenceId])
+
+  // 初始載入可用年份和會議列表
+  useEffect(() => {
+    // 避免重複載入
+    if (availableYears.length === 0) {
+      loadAvailableYears()
+    }
+    // 載入會議列表
+    if (conferenceList.length === 0) {
+      loadConferenceList()
+    }
+  }, [])
 
 
   // 前端排序功能
@@ -764,11 +1160,62 @@ export default function EditorDashboard() {
 
   const handleMakeDecision = async (assignmentId: string) => {
     try {
-      // 這裡可以開啟決議模態視窗或跳轉到決議頁面
-      alert('編輯決議功能開發中...')
+      setCurrentDecisionSubmissionId(assignmentId)
+      setShowDecisionModal(true)
+      setDecisionData({ decision: '', note: '' })
     } catch (error: any) {
-      setError('做出決定失敗: ' + (error.response?.data?.error || error.message))
+      setError('開啟決議視窗失敗: ' + (error.response?.data?.error || error.message))
     }
+  }
+
+  // 提交決議
+  const handleDecisionSubmit = async () => {
+    if (!currentDecisionSubmissionId || !decisionData.decision) {
+      setError('請選擇決議結果')
+      return
+    }
+
+    setIsMakingDecision(true)
+    try {
+      const response = await fetch(`/api/editor/submissions/${currentDecisionSubmissionId}/decision`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          decision: decisionData.decision,
+          note: decisionData.note.trim() || null
+        })
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || '建立決議失敗')
+      }
+
+      // 關閉模態視窗並重置狀態
+      setShowDecisionModal(false)
+      setCurrentDecisionSubmissionId(null)
+      setDecisionData({ decision: '', note: '' })
+      
+      // 重新載入投稿列表
+      await loadSubmissions()
+      
+      alert('決議已成功建立並通知作者')
+      
+    } catch (error: any) {
+      setError('建立決議失敗: ' + (error.message || '未知錯誤'))
+    } finally {
+      setIsMakingDecision(false)
+    }
+  }
+
+  // 關閉決議模態視窗
+  const handleCloseDecisionModal = () => {
+    setShowDecisionModal(false)
+    setCurrentDecisionSubmissionId(null)
+    setDecisionData({ decision: '', note: '' })
   }
 
   const handleDownloadPaper = async (assignmentId: string) => {
@@ -794,33 +1241,65 @@ export default function EditorDashboard() {
 
 
   const handleDeleteSubmission = async (assignmentId: string) => {
+    console.log('handleDeleteSubmission called with:', assignmentId)
     try {
       if (confirm('確定要刪除這篇稿件嗎？此操作無法復原。')) {
+        console.log('User confirmed deletion, calling API')
         await apiClient.delete(`/editor/submissions/${assignmentId}`)
+        console.log('API call successful, reloading page')
         // 重新載入數據
         window.location.reload()
+      } else {
+        console.log('User cancelled deletion')
       }
     } catch (error: any) {
+      console.error('Delete submission error:', error)
       setError('刪除稿件失敗: ' + (error.response?.data?.error || error.message))
     }
   }
 
   const toggleDropdown = (id: string) => {
+    console.log('toggleDropdown called with id:', id, 'current openDropdown:', openDropdown)
     setOpenDropdown(openDropdown === id ? null : id)
   }
+
+  // 點擊外部關閉下拉選單
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      
+      // 檢查是否點擊了下拉選單按鈕或下拉選單內容
+      if (target.closest('[data-dropdown]') || target.closest('[data-dropdown-content]')) {
+        return
+      }
+      
+      setOpenDropdown(null)
+    }
+
+    if (openDropdown) {
+      // 延遲添加監聽器，避免立即觸發
+      const timer = setTimeout(() => {
+        document.addEventListener('mousedown', handleClickOutside)
+      }, 150)
+      
+      return () => {
+        clearTimeout(timer)
+        document.removeEventListener('mousedown', handleClickOutside)
+      }
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [openDropdown])
 
   // 稿件操作菜單組件
   const DropdownMenu = ({ assignment }: { assignment: EditorAssignment }) => {
     const dropdownRef = useRef<HTMLDivElement>(null)
 
+    // 只處理 Escape 鍵，點擊外部由全域事件監聽器處理
     useEffect(() => {
       if (openDropdown !== assignment.id) return
-
-      const handleClickOutside = (event: MouseEvent) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-          setOpenDropdown(null)
-        }
-      }
 
       const handleEscape = (event: KeyboardEvent) => {
         if (event.key === 'Escape') {
@@ -828,11 +1307,9 @@ export default function EditorDashboard() {
         }
       }
 
-      document.addEventListener('mousedown', handleClickOutside)
       document.addEventListener('keydown', handleEscape)
 
       return () => {
-        document.removeEventListener('mousedown', handleClickOutside)
         document.removeEventListener('keydown', handleEscape)
       }
     }, [openDropdown, assignment.id])
@@ -846,16 +1323,21 @@ export default function EditorDashboard() {
           }}
           className="text-gray-500 hover:text-gray-700 p-1"
           title="更多操作"
+          data-dropdown
         >
           <MoreVertical className="w-4 h-4" />
         </button>
 
         {openDropdown === assignment.id && (
-          <div className="absolute right-0 top-full mt-1 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-[9999] shadow-2xl border-gray-300">
+          <div 
+            className="absolute right-0 top-full mt-1 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-[9999] shadow-2xl border-gray-300"
+            data-dropdown-content
+          >
             <div className="py-1">
               {assignment.status === 'submitted' && (
                 <button
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation()
                     handleAssignReviewer(assignment.id)
                     setOpenDropdown(null)
                   }}
@@ -867,7 +1349,8 @@ export default function EditorDashboard() {
               {(assignment.status === 'under_review' ||
                 assignment.status === 'revision_required') && (
                 <button
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation()
                     handleMakeDecision(assignment.id)
                     setOpenDropdown(null)
                   }}
@@ -877,7 +1360,9 @@ export default function EditorDashboard() {
                 </button>
               )}
               <button
-                onClick={() => {
+                onClick={(e) => {
+                  console.log('Delete button clicked for assignment:', assignment.id)
+                  e.stopPropagation()
                   handleDeleteSubmission(assignment.id)
                   setOpenDropdown(null)
                 }}
@@ -901,6 +1386,7 @@ export default function EditorDashboard() {
 
       const handleClickOutside = (event: MouseEvent) => {
         if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+          console.log('Clicking outside, closing dropdown')
           setOpenDropdown(null)
         }
       }
@@ -911,10 +1397,14 @@ export default function EditorDashboard() {
         }
       }
 
-      document.addEventListener('mousedown', handleClickOutside)
-      document.addEventListener('keydown', handleEscape)
+      // 延遲添加事件監聽器，避免立即觸發
+      const timer = setTimeout(() => {
+        document.addEventListener('mousedown', handleClickOutside)
+        document.addEventListener('keydown', handleEscape)
+      }, 100)
 
       return () => {
+        clearTimeout(timer)
         document.removeEventListener('mousedown', handleClickOutside)
         document.removeEventListener('keydown', handleEscape)
       }
@@ -934,7 +1424,9 @@ export default function EditorDashboard() {
           <div className="absolute right-0 top-full mt-1 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-[9999] shadow-2xl border-gray-300">
             <div className="py-1">
               <button
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation()
+                  console.log('Edit button clicked for member:', member.id)
                   handleEditMember(member.id)
                   setOpenDropdown(null)
                 }}
@@ -943,20 +1435,11 @@ export default function EditorDashboard() {
                 編輯資料
               </button>
               
-              <button
-                onClick={() => {
-                  // 查看成員詳細資料
-                  alert(`查看 ${member.name} 的詳細資料...`)
-                  setOpenDropdown(null)
-                }}
-                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors"
-              >
-                查看詳情
-              </button>
 
               {member.role === 'REVIEWER' && (
                 <button
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation()
                     // 查看審稿歷史
                     alert(`查看 ${member.name} 的審稿歷史...`)
                     setOpenDropdown(null)
@@ -967,22 +1450,10 @@ export default function EditorDashboard() {
                 </button>
               )}
 
-              <button
-                onClick={() => {
-                  handleToggleMemberStatus(member.id, member.status)
-                  setOpenDropdown(null)
-                }}
-                className={`w-full px-4 py-2 text-left text-sm transition-colors ${
-                  member.status === 'enabled' 
-                    ? 'text-orange-600 hover:bg-orange-50' 
-                    : 'text-green-600 hover:bg-green-50'
-                }`}
-              >
-                {member.status === 'enabled' ? '停用帳號' : '啟用帳號'}
-              </button>
 
               <button
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation()
                   handleDeleteMember(member.id)
                   setOpenDropdown(null)
                 }}
@@ -1031,7 +1502,10 @@ export default function EditorDashboard() {
           className="flex-1 px-4 py-8 md:px-14 md:py-14 bg-gray-100"
           style={{ overflow: 'visible' }}
         >
-          <div className="w-full md:max-w-7xl md:mx-auto" style={{ overflow: 'visible' }}>
+          <div
+            className="w-full md:max-w-7xl md:mx-auto"
+            style={{ overflow: 'visible' }}
+          >
             {/* 身份識別區域 */}
             <div className="mb-8 md:mb-[56px]">
               <div className="flex flex-col md:flex-row rounded-lg shadow-sm min-h-[132px]">
@@ -1066,7 +1540,11 @@ export default function EditorDashboard() {
                           : 'text-editor'
                       } leading-tight break-words`}
                     >
-{conference?.title || `${year} AI時代課程教學與傳播科技研討會`}
+                      {(() => {
+                        // 根據選中的會議ID找到對應的會議標題
+                        const selectedConference = availableYears.find(conf => conf.id === selectedConferenceId)
+                        return selectedConference?.label || conference?.title || `${year} AI時代課程教學與傳播科技研討會`
+                      })()}
                     </h1>
                     <div className="hidden md:block w-[2px] h-[56px] bg-gray-200"></div>
                   </div>
@@ -1103,12 +1581,12 @@ export default function EditorDashboard() {
                     </button>
                     <YearDropdown
                       value={year}
-                      onChange={setYear}
-                      options={[
-                        { value: 2025, label: '2025' },
-                        { value: 2024, label: '2024' },
-                        { value: 2023, label: '2023' },
-                      ]}
+                      selectedId={selectedConferenceId}
+                      onChange={(conferenceId, selectedYear) => {
+                        setSelectedConferenceId(conferenceId)
+                        setYear(selectedYear)
+                      }}
+                      options={availableYears}
                     />
                   </div>
                 </div>
@@ -1129,10 +1607,18 @@ export default function EditorDashboard() {
                   <div className="w-full bg-gray-200 rounded-full h-3 mb-4">
                     <div
                       className="bg-gradient-to-r from-green-400 to-purple-500 h-3 rounded-full"
-                      style={{ 
-                        width: stats.total > 0 
-                          ? `${Math.round(((stats.underReview + stats.revisionRequired + stats.accepted + stats.rejected) / stats.total) * 100)}%` 
-                          : '0%' 
+                      style={{
+                        width:
+                          stats.total > 0
+                            ? `${Math.round(
+                                ((stats.underReview +
+                                  stats.revisionRequired +
+                                  stats.accepted +
+                                  stats.rejected) /
+                                  stats.total) *
+                                  100
+                              )}%`
+                            : '0%',
                       }}
                     ></div>
                   </div>
@@ -1184,7 +1670,18 @@ export default function EditorDashboard() {
                           fill="none"
                           strokeWidth="3"
                           stroke="currentColor"
-                          strokeDasharray={`${stats.total > 0 ? Math.round(((stats.underReview + stats.revisionRequired + stats.accepted + stats.rejected) / stats.total) * 100) : 0}, 100`}
+                          strokeDasharray={`${
+                            stats.total > 0
+                              ? Math.round(
+                                  ((stats.underReview +
+                                    stats.revisionRequired +
+                                    stats.accepted +
+                                    stats.rejected) /
+                                    stats.total) *
+                                    100
+                                )
+                              : 0
+                          }, 100`}
                           d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                         />
                       </svg>
@@ -1201,15 +1698,40 @@ export default function EditorDashboard() {
                   <div className="space-y-2 text-sm">
                     <div className="flex items-center gap-2">
                       <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                      <span>處理進度 {stats.total > 0 ? Math.round(((stats.underReview + stats.revisionRequired + stats.accepted + stats.rejected) / stats.total) * 100) : 0}%</span>
+                      <span>
+                        處理進度{' '}
+                        {stats.total > 0
+                          ? Math.round(
+                              ((stats.underReview +
+                                stats.revisionRequired +
+                                stats.accepted +
+                                stats.rejected) /
+                                stats.total) *
+                                100
+                            )
+                          : 0}
+                        %
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                      <span>接受率 {stats.total > 0 ? Math.round((stats.accepted / stats.total) * 100) : 0}%</span>
+                      <span>
+                        接受率{' '}
+                        {stats.total > 0
+                          ? Math.round((stats.accepted / stats.total) * 100)
+                          : 0}
+                        %
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
-                      <span>拒絕率 {stats.total > 0 ? Math.round((stats.rejected / stats.total) * 100) : 0}%</span>
+                      <span>
+                        拒絕率{' '}
+                        {stats.total > 0
+                          ? Math.round((stats.rejected / stats.total) * 100)
+                          : 0}
+                        %
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1222,16 +1744,35 @@ export default function EditorDashboard() {
               style={{ overflow: 'visible' }}
             >
               <div className="px-[48px] py-[40px] border-b border-gray-200 flex items-center justify-between">
-                <h2 className="text-40M font-medium text-foreground">
-                  {activeTab === 'manuscripts'
-                    ? '稿件列表'
-                    : activeTab === 'members'
-                    ? '人員列表'
-                    : '會議設定'}
-                </h2>
+                <div className="flex items-center justify-between gap-4 w-full">
+                  <h2 className="text-40M font-medium text-foreground">
+                    {activeTab === 'manuscripts'
+                      ? '稿件列表'
+                      : activeTab === 'members'
+                      ? '人員列表'
+                      : '會議設定'}
+                  </h2>
+                  
+                </div>
 
                 {/* 篩選器 */}
                 {activeTab === 'manuscripts' && (
+                  <div className="flex items-center justify-between gap-4 w-full">
+                  {/* 標題和搜尋控制欄 */}
+                  <div className="">
+                    <div className="flex flex-col sm:flex-row gap-4">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="搜尋關鍵字"
+                          value={searchTerm}
+                          onChange={e => setSearchTerm(e.target.value)}
+                          className="w-full sm:w-80 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        />
+                      </div>
+                   
+                    </div>
+                  </div>
                   <div className="bg-white rounded-lg ">
                     <div className="flex flex-wrap gap-2">
                       {[
@@ -1258,11 +1799,12 @@ export default function EditorDashboard() {
                       ))}
                     </div>
                   </div>
+                  </div>
                 )}
 
                 {/* 人員篩選器和搜尋 */}
                 {activeTab === 'members' && (
-                  <div className="bg-white rounded-lg flex items-center gap-4">
+                  <div className="bg-white rounded-lg flex items-center gap-4 w-full">
                     {/* 搜尋框 */}
                     <div className="relative">
                       <input
@@ -1275,7 +1817,7 @@ export default function EditorDashboard() {
                     </div>
 
                     {/* 角色篩選 */}
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex gap-1">
                       {[
                         { key: 'all', label: '全部' },
                         { key: 'editor', label: '編輯' },
@@ -1380,14 +1922,20 @@ export default function EditorDashboard() {
                       </thead>
                       <tbody className="divide-y divide-gray-200">
                         {sortedAssignments.map((assignment, index) => (
-                          <tr 
-                            key={assignment.id} 
+                          <tr
+                            key={assignment.id}
                             className="hover:bg-gray-50 cursor-pointer"
-                            onClick={() => router.push(`/editor/submissions/${assignment.id}`)}
+                            onClick={() =>
+                              router.push(
+                                `/editor/submissions/${assignment.id}`
+                              )
+                            }
                           >
                             {/* 編號 */}
                             <td className="px-3 py-4 text-sm text-foreground w-16">
-                              {(assignment.serialNumber || assignment.id).slice(-6)}
+                              {(assignment.serialNumber || assignment.id).slice(
+                                -6
+                              )}
                             </td>
 
                             {/* 標題 */}
@@ -1479,8 +2027,11 @@ export default function EditorDashboard() {
                                     } block truncate`}
                                     title={assignment.recommendation}
                                   >
-                                    {assignment.recommendation.length > 50 
-                                      ? `${assignment.recommendation.substring(0, 50)}...` 
+                                    {assignment.recommendation.length > 50
+                                      ? `${assignment.recommendation.substring(
+                                          0,
+                                          50
+                                        )}...`
                                       : assignment.recommendation}
                                   </span>
                                 </div>
@@ -1577,7 +2128,7 @@ export default function EditorDashboard() {
                             .filter(member => {
                               // 排除投稿人角色
                               if (member.role === 'AUTHOR') return false
-                              
+
                               if (memberFilter === 'all') return true
                               if (memberFilter === 'editor')
                                 return (
@@ -1668,15 +2219,85 @@ export default function EditorDashboard() {
                                 </td>
 
                                 {/* 操作 */}
-                                <td
-                                  className={`px-4 py-4 relative ${
-                                    openDropdown === member.id
-                                      ? 'z-[10000]'
-                                      : ''
-                                  }`}
-                                  style={{ overflow: 'visible' }}
-                                >
-                                  <MemberDropdownMenu member={member} />
+                                <td className="px-4 py-4 relative">
+                                  <button
+                                    data-dropdown
+                                    onClick={e => {
+                                      e.stopPropagation()
+                                      console.log(
+                                        'Three dots clicked, current openDropdown:',
+                                        openDropdown,
+                                        'member.id:',
+                                        member.id
+                                      )
+                                      const newValue =
+                                        openDropdown === member.id
+                                          ? null
+                                          : member.id
+                                      console.log(
+                                        'Setting openDropdown to:',
+                                        newValue
+                                      )
+                                      setOpenDropdown(newValue)
+                                    }}
+                                    className="text-gray-500 hover:text-gray-700 p-1"
+                                    title="更多操作"
+                                  >
+                                    <MoreVertical className="w-4 h-4" />
+                                  </button>
+
+                                  {openDropdown === member.id && (
+                                    <div
+                                      data-dropdown-content
+                                      className="absolute right-15 top-12  w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-[9999]"
+                                    >
+                                      <div className="py-1">
+                                        <button
+                                          onClick={e => {
+                                            e.stopPropagation()
+                                            console.log(
+                                              'Edit from dropdown clicked for:',
+                                              member.id
+                                            )
+                                            handleEditMember(member.id)
+                                            setOpenDropdown(null)
+                                          }}
+                                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                        >
+                                          編輯資料
+                                        </button>
+
+                                        {(member.role === 'REVIEWER' ||
+                                          member.role === 'CHIEF_EDITOR') && (
+                                          <button
+                                            onClick={e => {
+                                              e.stopPropagation()
+                                              console.log(
+                                                'Review history from dropdown clicked for:',
+                                                member.id
+                                              )
+                                              handleReviewHistory(member.id)
+                                              setOpenDropdown(null)
+                                            }}
+                                            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                          >
+                                            審稿紀錄
+                                          </button>
+                                        )}
+
+                                        <button
+                                          onClick={e => {
+                                            e.stopPropagation()
+                                            handleDeleteMember(member.id)
+                                            setOpenDropdown(null)
+                                          }}
+                                          className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                        >
+                                          刪除人員
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
                                 </td>
                               </tr>
                             ))}
@@ -1684,263 +2305,244 @@ export default function EditorDashboard() {
                       </table>
                     </div>
                   ) : (
-                    // 會議設定介面
+                    // 會議列表介面
                     <div className="space-y-6">
-                      {user?.roles?.includes('CHIEF_EDITOR') ? (
-                        <div className="bg-white rounded-lg border p-6 space-y-6">
-                          {/* 基本設定 */}
-                          <div>
-                            <h3 className="text-lg font-medium text-gray-900 mb-4">基本設定</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  會議年份
-                                </label>
-                                <input
-                                  type="number"
-                                  value={conference?.year || year}
-                                  readOnly
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  會議狀態
-                                </label>
-                                <select 
-                                  value={conference?.isActive ? 'active' : 'inactive'}
-                                  onChange={(e) => {
-                                    if (conference) {
-                                      setConference({
-                                        ...conference,
-                                        isActive: e.target.value === 'active'
-                                      })
-                                    }
-                                  }}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                                >
-                                  <option value="inactive">籌備中</option>
-                                  <option value="active">進行中</option>
-                                </select>
-                              </div>
-                            </div>
-                            <div className="mt-4">
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                會議標題
-                              </label>
-                              <input
-                                type="text"
-                                value={conference?.title || ''}
-                                onChange={(e) => {
-                                  if (conference) {
-                                    setConference({
-                                      ...conference,
-                                      title: e.target.value
-                                    })
-                                  }
-                                }}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                                placeholder="請輸入會議標題"
-                              />
-                            </div>
-                          </div>
+                      {/* 會議列表表格 */}
+                      <div className="bg-white rounded-lg border overflow-hidden">
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead className="bg-gray-50 border-b">
+                              <tr>
+                                <th className="px-6 py-4 text-left text-sm font-medium text-gray-900">
+                                  年份
+                                </th>
+                                <th className="px-6 py-4 text-left text-sm font-medium text-gray-900">
+                                  會議標題
+                                </th>
+                                <th className="px-6 py-4 text-left text-sm font-medium text-gray-900">
+                                  會議子題
+                                </th>
+                                <th className="px-6 py-4 text-center text-sm font-medium text-gray-900">
+                                  開放狀態
+                                </th>
+                                <th className="px-6 py-4 text-center text-sm font-medium text-gray-900">
+                                  編輯
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {(() => {
+                                // 過濾會議列表（根據搜尋詞）
+                                const filteredConferences =
+                                  conferenceList.filter(
+                                    conference =>
+                                      conference.title
+                                        .toLowerCase()
+                                        .includes(searchTerm.toLowerCase()) ||
+                                      conference.subtopics.some(topic =>
+                                        topic
+                                          .toLowerCase()
+                                          .includes(searchTerm.toLowerCase())
+                                      )
+                                  )
 
-                          {/* 重要日期設定 */}
-                          <div>
-                            <h3 className="text-lg font-medium text-gray-900 mb-4">重要日期</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  投稿截止日期
-                                </label>
-                                <input
-                                  type="date"
-                                  value={conference?.settings?.submissionDeadline || ''}
-                                  onChange={(e) => {
-                                    if (conference) {
-                                      setConference({
-                                        ...conference,
-                                        settings: {
-                                          ...conference.settings,
-                                          submissionDeadline: e.target.value
-                                        }
-                                      })
-                                    }
-                                  }}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  審稿截止日期
-                                </label>
-                                <input
-                                  type="date"
-                                  value={conference?.settings?.reviewDeadline || ''}
-                                  onChange={(e) => {
-                                    if (conference) {
-                                      setConference({
-                                        ...conference,
-                                        settings: {
-                                          ...conference.settings,
-                                          reviewDeadline: e.target.value
-                                        }
-                                      })
-                                    }
-                                  }}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  結果通知日期
-                                </label>
-                                <input
-                                  type="date"
-                                  value={conference?.settings?.notificationDate || ''}
-                                  onChange={(e) => {
-                                    if (conference) {
-                                      setConference({
-                                        ...conference,
-                                        settings: {
-                                          ...conference.settings,
-                                          notificationDate: e.target.value
-                                        }
-                                      })
-                                    }
-                                  }}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  會議舉辦日期
-                                </label>
-                                <input
-                                  type="date"
-                                  value={conference?.settings?.conferenceDate || ''}
-                                  onChange={(e) => {
-                                    if (conference) {
-                                      setConference({
-                                        ...conference,
-                                        settings: {
-                                          ...conference.settings,
-                                          conferenceDate: e.target.value
-                                        }
-                                      })
-                                    }
-                                  }}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                                />
-                              </div>
-                            </div>
-                          </div>
+                                // 分頁邏輯
+                                const startIndex =
+                                  (conferenceCurrentPage - 1) *
+                                  conferencesPerPage
+                                const endIndex = startIndex + conferencesPerPage
+                                const paginatedConferences =
+                                  filteredConferences.slice(
+                                    startIndex,
+                                    endIndex
+                                  )
 
-                          {/* 主題軌道設定 */}
-                          <div>
-                            <h3 className="text-lg font-medium text-gray-900 mb-4">主題軌道</h3>
-                            <div className="space-y-3">
-                              {Object.entries(conference?.tracks || {}).map(([key, value]) => (
-                                <div key={key} className="flex items-center space-x-3">
-                                  <input
-                                    type="text"
-                                    value={key}
-                                    onChange={(e) => {
-                                      if (conference && conference.tracks) {
-                                        const newTracks = { ...conference.tracks }
-                                        delete newTracks[key]
-                                        newTracks[e.target.value] = value
-                                        setConference({
-                                          ...conference,
-                                          tracks: newTracks
-                                        })
-                                      }
-                                    }}
-                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
-                                    placeholder="軌道代碼"
-                                  />
-                                  <input
-                                    type="text"
-                                    value={value as string}
-                                    onChange={(e) => {
-                                      if (conference && conference.tracks) {
-                                        setConference({
-                                          ...conference,
-                                          tracks: {
-                                            ...conference.tracks,
-                                            [key]: e.target.value
-                                          }
-                                        })
-                                      }
-                                    }}
-                                    className="flex-2 px-3 py-2 border border-gray-300 rounded-md"
-                                    placeholder="軌道名稱"
-                                  />
-                                  <button
-                                    onClick={() => {
-                                      if (conference && conference.tracks) {
-                                        const newTracks = { ...conference.tracks }
-                                        delete newTracks[key]
-                                        setConference({
-                                          ...conference,
-                                          tracks: newTracks
-                                        })
-                                      }
-                                    }}
-                                    className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-md"
+                                return paginatedConferences.map(conference => (
+                                  <tr
+                                    key={conference.id}
+                                    className="hover:bg-gray-50"
                                   >
-                                    刪除
-                                  </button>
-                                </div>
-                              ))}
-                              <button
-                                onClick={() => {
-                                  if (conference) {
-                                    const newKey = `track_${Date.now()}`
-                                    setConference({
-                                      ...conference,
-                                      tracks: {
-                                        ...conference.tracks,
-                                        [newKey]: '新軌道'
-                                      }
-                                    })
-                                  }
-                                }}
-                                className="w-full px-4 py-2 border-2 border-dashed border-gray-300 rounded-md text-gray-500 hover:border-gray-400 hover:text-gray-600"
-                              >
-                                + 新增軌道
-                              </button>
-                            </div>
-                          </div>
+                                    <td className="px-6 py-4 text-sm text-gray-900">
+                                      {conference.year}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="text-sm font-medium text-gray-900">
+                                        {conference.title}
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <div className="text-sm text-gray-600 max-w-md">
+                                        {conference.subtopics.map(
+                                          (topic, index) => (
+                                            <span
+                                              key={index}
+                                              className="inline-block mr-2 mb-1 px-2 py-1 bg-gray-100 text-gray-800 rounded-lg text-xs"
+                                            >
+                                              {topic}
+                                            </span>
+                                          )
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-center">
+                                      <button
+                                        onClick={async () => {
+                                          // 前端權限檢查
+                                          if (!hasRole('CHIEF_EDITOR')) {
+                                            setError('只有主編可以切換會議狀態')
+                                            return
+                                          }
+                                          
+                                          console.log('=== 切換會議狀態 - 前端權限檢查通過 ===')
+                                          
+                                          try {
+                                            // 準備要傳送到 API 的資料
+                                            const conferenceData = {
+                                              year: conference.year,
+                                              title: conference.title,
+                                              tracks: conference.subtopics.reduce((acc, topic, index) => ({
+                                                ...acc,
+                                                [`topic_${index + 1}`]: topic
+                                              }), {}),
+                                              isActive: !conference.isActive, // 切換狀態
+                                            }
 
-                          {/* 儲存按鈕 */}
-                          <div className="flex justify-end space-x-3">
-                            <button
-                              onClick={async () => {
-                                try {
-                                  if (conference) {
-                                    await apiClient.put('/api/conferences', conference)
-                                    alert('會議設定已儲存')
-                                  }
-                                } catch (error) {
-                                  console.error('儲存會議設定失敗:', error)
-                                  alert('儲存失敗，請重試')
+                                            console.log('正在切換會議狀態:', conferenceData)
+                                            
+                                            // 呼叫 API 更新到資料庫
+                                            const response = await fetch('/api/conferences', {
+                                              method: 'PUT',
+                                              headers: {
+                                                'Content-Type': 'application/json',
+                                              },
+                                              body: JSON.stringify(conferenceData),
+                                            })
+
+                                            if (!response.ok) {
+                                              const errorData = await response.json()
+                                              throw new Error(errorData.error || '切換會議狀態失敗')
+                                            }
+
+                                            const result = await response.json()
+                                            console.log('會議狀態切換成功:', result)
+
+                                            // 重新載入會議列表
+                                            await loadConferenceList()
+                                            
+                                          } catch (error: any) {
+                                            console.error('切換會議狀態失敗:', error)
+                                            setError('切換會議狀態失敗: ' + error.message)
+                                          }
+                                        }}
+                                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                          conference.isActive
+                                            ? 'bg-purple-600'
+                                            : 'bg-gray-300'
+                                        }`}
+                                      >
+                                        <span
+                                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                            conference.isActive
+                                              ? 'translate-x-6'
+                                              : 'translate-x-1'
+                                          }`}
+                                        />
+                                      </button>
+                                    </td>
+                                    <td className="px-6 py-4 text-center">
+                                      <button
+                                        onClick={() => {
+                                          setEditingConference(conference)
+                                          setShowEditConferenceModal(true)
+                                        }}
+                                        className="text-gray-400 hover:text-gray-600"
+                                      >
+                                        <Edit3 className="h-5 w-5" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))
+                              })()}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* 分頁控制 */}
+                        {(() => {
+                          const filteredConferences = conferenceList.filter(
+                            conference =>
+                              conference.title
+                                .toLowerCase()
+                                .includes(searchTerm.toLowerCase()) ||
+                              conference.subtopics.some(topic =>
+                                topic
+                                  .toLowerCase()
+                                  .includes(searchTerm.toLowerCase())
+                              )
+                          )
+                          const totalPages = Math.ceil(
+                            filteredConferences.length / conferencesPerPage
+                          )
+
+                          if (totalPages <= 1) return null
+
+                          return (
+                            <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+                              <button
+                                onClick={() =>
+                                  setConferenceCurrentPage(
+                                    Math.max(1, conferenceCurrentPage - 1)
+                                  )
                                 }
-                              }}
-                              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                            >
-                              儲存設定
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="bg-white rounded-lg border p-6">
-                          <div className="text-center text-gray-500">
-                            <p className="text-lg font-medium mb-2">權限不足</p>
-                            <p>只有主編可以修改會議設定</p>
-                          </div>
-                        </div>
-                      )}
+                                disabled={conferenceCurrentPage === 1}
+                                className="px-3 py-1 text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                ‹
+                              </button>
+
+                              <div className="flex items-center gap-2">
+                                {Array.from(
+                                  { length: totalPages },
+                                  (_, i) => i + 1
+                                ).map(page => (
+                                  <button
+                                    key={page}
+                                    onClick={() =>
+                                      setConferenceCurrentPage(page)
+                                    }
+                                    className={`px-3 py-1 text-sm rounded ${
+                                      page === conferenceCurrentPage
+                                        ? 'bg-purple-600 text-white'
+                                        : 'text-gray-500 hover:text-gray-700'
+                                    }`}
+                                  >
+                                    {page}
+                                  </button>
+                                ))}
+                              </div>
+
+                              <button
+                                onClick={() =>
+                                  setConferenceCurrentPage(
+                                    Math.min(
+                                      totalPages,
+                                      conferenceCurrentPage + 1
+                                    )
+                                  )
+                                }
+                                disabled={conferenceCurrentPage === totalPages}
+                                className="px-3 py-1 text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                ›
+                              </button>
+
+                              <div className="text-sm text-gray-500 ml-4">
+                                共 {filteredConferences.length} 筆資料
+                              </div>
+                            </div>
+                          )
+                        })()}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2045,321 +2647,864 @@ export default function EditorDashboard() {
                     </div>
                   </div>
                 </div>
-                ) : null}
-                </div>
+              ) : null}
+            </div>
 
-                {/* 手機版佈局 - 稿件卡片式顯示 */}
-                <div className="md:hidden">
-                  {activeTab === 'manuscripts' && (
-                    <div className="space-y-4">
-                      {sortedAssignments.map((assignment, index) => (
-                        <div
-                          key={assignment.id}
-                          className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm cursor-pointer"
-                          onClick={() => router.push(`/editor/submissions/${assignment.id}`)}
+            {/* 手機版佈局 - 稿件卡片式顯示 */}
+            <div className="md:hidden">
+              {activeTab === 'manuscripts' && (
+                <div className="space-y-4">
+                  {sortedAssignments.map((assignment, index) => (
+                    <div
+                      key={assignment.id}
+                      className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm cursor-pointer"
+                      onClick={() =>
+                        router.push(`/editor/submissions/${assignment.id}`)
+                      }
+                    >
+                      {/* 上方區域：編號和狀態 */}
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-blue-600 font-medium text-sm">
+                          #
+                          {(assignment.serialNumber || assignment.id).slice(-6)}
+                        </div>
+                        <span
+                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
+                            assignment.status === 'accepted'
+                              ? 'bg-green-100 text-green-800'
+                              : assignment.status === 'under_review'
+                              ? 'bg-amber-100 text-amber-800'
+                              : assignment.status === 'submitted'
+                              ? 'bg-blue-100 text-blue-800'
+                              : assignment.status === 'revision_required'
+                              ? 'bg-orange-100 text-orange-800'
+                              : assignment.status === 'rejected'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-gray-100 text-gray-800'
+                          }`}
                         >
-                          {/* 上方區域：編號和狀態 */}
-                          <div className="flex items-center justify-between mb-3">
-                            <div className="text-blue-600 font-medium text-sm">
-                              #{(assignment.serialNumber || assignment.id).slice(-6)}
-                            </div>
-                            <span
-                              className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
-                                assignment.status === 'accepted'
-                                  ? 'bg-green-100 text-green-800'
-                                  : assignment.status === 'under_review'
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : assignment.status === 'submitted'
-                                  ? 'bg-blue-100 text-blue-800'
-                                  : assignment.status === 'revision_required'
-                                  ? 'bg-orange-100 text-orange-800'
-                                  : assignment.status === 'rejected'
-                                  ? 'bg-red-100 text-red-800'
-                                  : 'bg-gray-100 text-gray-800'
-                              }`}
-                            >
-                              {getStatusText(assignment.status)}
-                            </span>
-                          </div>
+                          {getStatusText(assignment.status)}
+                        </span>
+                      </div>
 
-                          {/* 標題和作者 */}
-                          <div className="mb-3">
-                            <h3 className="font-medium text-foreground mb-2 leading-tight">
-                              {assignment.title}
-                            </h3>
-                            <div className="text-sm text-gray-600">
-                              作者：{assignment.authors.join('、')}
-                            </div>
-                          </div>
+                      {/* 標題和作者 */}
+                      <div className="mb-3">
+                        <h3 className="font-medium text-foreground mb-2 leading-tight">
+                          {assignment.title}
+                        </h3>
+                        <div className="text-sm text-gray-600">
+                          作者：{assignment.authors.join('、')}
+                        </div>
+                      </div>
 
-                          {/* 審稿人資訊 */}
-                          {assignment.assignedReviewer && assignment.assignedReviewer.length > 0 && (
-                            <div className="mb-3 p-2 bg-gray-50 rounded">
-                              <div className="text-xs text-gray-500 mb-1">審稿人</div>
-                              <div className="text-sm text-foreground">
-                                {assignment.assignedReviewer.join('、')}
-                              </div>
-                              {assignment.assignDate && (
-                                <div className="text-xs text-gray-500 mt-1">
-                                  指派：{assignment.assignDate}
-                                </div>
-                              )}
+                      {/* 審稿人資訊 */}
+                      {assignment.assignedReviewer &&
+                        assignment.assignedReviewer.length > 0 && (
+                          <div className="mb-3 p-2 bg-gray-50 rounded">
+                            <div className="text-xs text-gray-500 mb-1">
+                              審稿人
                             </div>
-                          )}
-
-                          {/* 狀態資訊 */}
-                          <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
-                            {assignment.reviewStatus && (
-                              <div>
-                                <div className="text-xs text-gray-500">審稿狀態</div>
-                                <div
-                                  className={`${
-                                    assignment.reviewStatus === '已完成'
-                                      ? 'text-green-600'
-                                      : assignment.reviewStatus === '待分配'
-                                      ? 'text-gray-500'
-                                      : 'text-amber-600'
-                                  }`}
-                                >
-                                  {assignment.reviewStatus}
-                                </div>
-                              </div>
-                            )}
-                            
-                            {assignment.finalDecision && (
-                              <div>
-                                <div className="text-xs text-gray-500">最終決議</div>
-                                <span
-                                  className={`inline-flex items-center gap-1 ${
-                                    assignment.finalDecision === 'ACCEPT'
-                                      ? 'text-green-600'
-                                      : assignment.finalDecision === 'REJECT'
-                                      ? 'text-red-600'
-                                      : 'text-orange-600'
-                                  }`}
-                                >
-                                  {assignment.finalDecision === 'ACCEPT' && (
-                                    <CheckCircle className="w-3 h-3" />
-                                  )}
-                                  {assignment.finalDecision === 'REJECT' && (
-                                    <AlertCircle className="w-3 h-3" />
-                                  )}
-                                  {assignment.finalDecision === 'REVISE' && (
-                                    <AlertCircle className="w-3 h-3" />
-                                  )}
-                                  {assignment.finalDecision === 'ACCEPT'
-                                    ? '接受'
-                                    : assignment.finalDecision === 'REJECT'
-                                    ? '拒絕'
-                                    : '需修改'}
-                                </span>
+                            <div className="text-sm text-foreground">
+                              {assignment.assignedReviewer.join('、')}
+                            </div>
+                            {assignment.assignDate && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                指派：{assignment.assignDate}
                               </div>
                             )}
                           </div>
+                        )}
 
-                          {/* 操作按鈕 */}
-                          <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+                      {/* 狀態資訊 */}
+                      <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
+                        {assignment.reviewStatus && (
+                          <div>
                             <div className="text-xs text-gray-500">
-                              點擊卡片查看詳情
+                              審稿狀態
                             </div>
                             <div
-                              className="relative"
-                              onClick={(e) => e.stopPropagation()}
+                              className={`${
+                                assignment.reviewStatus === '已完成'
+                                  ? 'text-green-600'
+                                  : assignment.reviewStatus === '待分配'
+                                  ? 'text-gray-500'
+                                  : 'text-amber-600'
+                              }`}
                             >
-                              <DropdownMenu assignment={assignment} />
+                              {assignment.reviewStatus}
                             </div>
                           </div>
-                        </div>
-                      ))}
-                      
-                      {/* 手機版分頁控制 */}
-                      {manuscriptPagination.totalPages > 1 && (
-                        <div className="flex flex-col items-center gap-3 mt-6 p-4 bg-white rounded-lg border border-gray-200">
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() =>
-                                handleManuscriptPageChange(manuscriptPagination.currentPage - 1)
-                              }
-                              disabled={!manuscriptPagination.hasPrevPage}
-                              className="px-3 py-2 text-sm bg-gray-100 text-gray-600 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        )}
+
+                        {assignment.finalDecision && (
+                          <div>
+                            <div className="text-xs text-gray-500">
+                              最終決議
+                            </div>
+                            <span
+                              className={`inline-flex items-center gap-1 ${
+                                assignment.finalDecision === 'ACCEPT'
+                                  ? 'text-green-600'
+                                  : assignment.finalDecision === 'REJECT'
+                                  ? 'text-red-600'
+                                  : 'text-orange-600'
+                              }`}
                             >
-                              上一頁
-                            </button>
-                            
-                            <span className="px-3 py-2 text-sm text-gray-600">
-                              {manuscriptPagination.currentPage} / {manuscriptPagination.totalPages}
+                              {assignment.finalDecision === 'ACCEPT' && (
+                                <CheckCircle className="w-3 h-3" />
+                              )}
+                              {assignment.finalDecision === 'REJECT' && (
+                                <AlertCircle className="w-3 h-3" />
+                              )}
+                              {assignment.finalDecision === 'REVISE' && (
+                                <AlertCircle className="w-3 h-3" />
+                              )}
+                              {assignment.finalDecision === 'ACCEPT'
+                                ? '接受'
+                                : assignment.finalDecision === 'REJECT'
+                                ? '拒絕'
+                                : '需修改'}
                             </span>
-                            
-                            <button
-                              onClick={() =>
-                                handleManuscriptPageChange(manuscriptPagination.currentPage + 1)
-                              }
-                              disabled={!manuscriptPagination.hasNextPage}
-                              className="px-3 py-2 text-sm bg-gray-100 text-gray-600 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              下一頁
-                            </button>
                           </div>
-                          
-                          <div className="text-xs text-gray-500">
-                            共 {manuscriptPagination.total} 篇稿件
-                          </div>
+                        )}
+                      </div>
+
+                      {/* 操作按鈕 */}
+                      <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+                        <div className="text-xs text-gray-500">
+                          點擊卡片查看詳情
                         </div>
-                      )}
+                        <div
+                          className="relative"
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <DropdownMenu assignment={assignment} />
+                        </div>
+                      </div>
                     </div>
-                  )}
+                  ))}
 
-                  {/* 手機版人員列表 - 卡片式顯示 */}
-                  {activeTab === 'members' && (
-                    <div className="space-y-4">
-                      {members
-                        .filter(member => {
-                          // 排除投稿人角色
-                          if (member.role === 'AUTHOR') return false
-                          
-                          if (memberFilter === 'all') return true
-                          if (memberFilter === 'editor')
-                            return (
-                              member.role === 'EDITOR' ||
-                              member.role === 'CHIEF_EDITOR'
+                  {/* 手機版分頁控制 */}
+                  {manuscriptPagination.totalPages > 1 && (
+                    <div className="flex flex-col items-center gap-3 mt-6 p-4 bg-white rounded-lg border border-gray-200">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() =>
+                            handleManuscriptPageChange(
+                              manuscriptPagination.currentPage - 1
                             )
-                          if (memberFilter === 'reviewer')
-                            return member.role === 'REVIEWER'
-                          return true
-                        })
-                        .map(member => (
-                          <div
-                            key={member.id}
-                            className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm"
-                          >
-                            {/* 上方區域：姓名、角色和狀態 */}
-                            <div className="flex items-start justify-between mb-3">
-                              <div className="flex-1">
-                                <h3 className="font-medium text-foreground text-lg">
-                                  {member.name}
-                                </h3>
-                                <div className="text-sm text-blue-600 mt-1">
-                                  {getRoleText(member.role)}
-                                </div>
-                              </div>
-                              <span
-                                className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${getMemberStatusColor(
-                                  member.status
-                                )}`}
-                              >
-                                {getMemberStatusText(member.status)}
-                              </span>
-                            </div>
+                          }
+                          disabled={!manuscriptPagination.hasPrevPage}
+                          className="px-3 py-2 text-sm bg-gray-100 text-gray-600 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          上一頁
+                        </button>
 
-                            {/* 聯絡資訊 */}
-                            <div className="mb-3">
-                              <div className="text-xs text-gray-500 mb-1">電子郵件</div>
-                              <div className="text-sm text-foreground break-all">
-                                {member.email}
-                              </div>
-                            </div>
+                        <span className="px-3 py-2 text-sm text-gray-600">
+                          {manuscriptPagination.currentPage} /{' '}
+                          {manuscriptPagination.totalPages}
+                        </span>
 
-                            {/* 服務單位與職稱 */}
-                            <div className="mb-3">
-                              <div className="text-xs text-gray-500 mb-1">服務單位與職稱</div>
-                              <div className="text-sm text-foreground">
-                                {member.affiliation}
-                              </div>
-                              <div className="text-xs text-gray-500 mt-1">
-                                {member.position}
-                              </div>
-                            </div>
+                        <button
+                          onClick={() =>
+                            handleManuscriptPageChange(
+                              manuscriptPagination.currentPage + 1
+                            )
+                          }
+                          disabled={!manuscriptPagination.hasNextPage}
+                          className="px-3 py-2 text-sm bg-gray-100 text-gray-600 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          下一頁
+                        </button>
+                      </div>
 
-                            {/* ORCID ID */}
-                            {member.orcidId && (
-                              <div className="mb-3">
-                                <div className="text-xs text-gray-500 mb-1">ORCID ID</div>
-                                <a
-                                  href={`https://orcid.org/${member.orcidId}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-sm text-blue-600 hover:text-blue-800 hover:underline break-all"
-                                >
-                                  {member.orcidId}
-                                </a>
-                              </div>
-                            )}
-
-                            {/* 專業知識領域 */}
-                            <div className="mb-3">
-                              <div className="text-xs text-gray-500 mb-2">專業知識領域</div>
-                              <div className="flex flex-wrap gap-1">
-                                {member.expertise.slice(0, 3).map((field, idx) => (
-                                  <span
-                                    key={idx}
-                                    className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800"
-                                  >
-                                    {field.length > 15
-                                      ? field.slice(0, 15) + '...'
-                                      : field}
-                                  </span>
-                                ))}
-                                {member.expertise.length > 3 && (
-                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
-                                    +{member.expertise.length - 3}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* 操作按鈕 */}
-                            <div className="flex justify-between items-center pt-2 border-t border-gray-100">
-                              <div className="text-xs text-gray-500">
-                                人員管理操作
-                              </div>
-                              <div className="relative">
-                                <MemberDropdownMenu member={member} />
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      
-                      {/* 手機版人員分頁控制 */}
-                      {memberPagination.totalPages > 1 && (
-                        <div className="flex flex-col items-center gap-3 mt-6 p-4 bg-white rounded-lg border border-gray-200">
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() =>
-                                handleMemberPageChange(memberPagination.currentPage - 1)
-                              }
-                              disabled={!memberPagination.hasPrevPage}
-                              className="px-3 py-2 text-sm bg-gray-100 text-gray-600 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              上一頁
-                            </button>
-                            
-                            <span className="px-3 py-2 text-sm text-gray-600">
-                              {memberPagination.currentPage} / {memberPagination.totalPages}
-                            </span>
-                            
-                            <button
-                              onClick={() =>
-                                handleMemberPageChange(memberPagination.currentPage + 1)
-                              }
-                              disabled={!memberPagination.hasNextPage}
-                              className="px-3 py-2 text-sm bg-gray-100 text-gray-600 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              下一頁
-                            </button>
-                          </div>
-                          
-                          <div className="text-xs text-gray-500">
-                            共 {memberPagination.total} 位成員
-                          </div>
-                        </div>
-                      )}
+                      <div className="text-xs text-gray-500">
+                        共 {manuscriptPagination.total} 篇稿件
+                      </div>
                     </div>
                   )}
                 </div>
-      
-                
+              )}
+
+              {/* 手機版人員列表 - 卡片式顯示 */}
+              {activeTab === 'members' && (
+                <div className="space-y-4">
+                  {members
+                    .filter(member => {
+                      // 排除投稿人角色
+                      if (member.role === 'AUTHOR') return false
+
+                      if (memberFilter === 'all') return true
+                      if (memberFilter === 'editor')
+                        return (
+                          member.role === 'EDITOR' ||
+                          member.role === 'CHIEF_EDITOR'
+                        )
+                      if (memberFilter === 'reviewer')
+                        return member.role === 'REVIEWER'
+                      return true
+                    })
+                    .map(member => (
+                      <div
+                        key={member.id}
+                        className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm"
+                      >
+                        {/* 上方區域：姓名、角色和狀態 */}
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex-1">
+                            <h3 className="font-medium text-foreground text-lg">
+                              {member.name}
+                            </h3>
+                            <div className="text-sm text-blue-600 mt-1">
+                              {getRoleText(member.role)}
+                            </div>
+                          </div>
+                          <span
+                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${getMemberStatusColor(
+                              member.status
+                            )}`}
+                          >
+                            {getMemberStatusText(member.status)}
+                          </span>
+                        </div>
+
+                        {/* 聯絡資訊 */}
+                        <div className="mb-3">
+                          <div className="text-xs text-gray-500 mb-1">
+                            電子郵件
+                          </div>
+                          <div className="text-sm text-foreground break-all">
+                            {member.email}
+                          </div>
+                        </div>
+
+                        {/* 服務單位與職稱 */}
+                        <div className="mb-3">
+                          <div className="text-xs text-gray-500 mb-1">
+                            服務單位與職稱
+                          </div>
+                          <div className="text-sm text-foreground">
+                            {member.affiliation}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            {member.position}
+                          </div>
+                        </div>
+
+                        {/* ORCID ID */}
+                        {member.orcidId && (
+                          <div className="mb-3">
+                            <div className="text-xs text-gray-500 mb-1">
+                              ORCID ID
+                            </div>
+                            <a
+                              href={`https://orcid.org/${member.orcidId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm text-blue-600 hover:text-blue-800 hover:underline break-all"
+                            >
+                              {member.orcidId}
+                            </a>
+                          </div>
+                        )}
+
+                        {/* 專業知識領域 */}
+                        <div className="mb-3">
+                          <div className="text-xs text-gray-500 mb-2">
+                            專業知識領域
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {member.expertise.slice(0, 3).map((field, idx) => (
+                              <span
+                                key={idx}
+                                className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800"
+                              >
+                                {field.length > 15
+                                  ? field.slice(0, 15) + '...'
+                                  : field}
+                              </span>
+                            ))}
+                            {member.expertise.length > 3 && (
+                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
+                                +{member.expertise.length - 3}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 操作按鈕 */}
+                        <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+                          <div className="text-xs text-gray-500">
+                            人員管理操作
+                          </div>
+                          <div className="relative">
+                            <button
+                              data-dropdown
+                              onClick={e => {
+                                e.stopPropagation()
+                                console.log(
+                                  'Three dots clicked (card view), toggling dropdown for:',
+                                  member.id
+                                )
+                                setOpenDropdown(
+                                  openDropdown === member.id ? null : member.id
+                                )
+                              }}
+                              className="text-gray-500 hover:text-gray-700 p-1"
+                              title="更多操作"
+                            >
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
+
+                            {openDropdown === member.id && (
+                              <div
+                                data-dropdown-content
+                                className="absolute right-0 top-full mt-1 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-[9999]"
+                              >
+                                <div className="py-1">
+                                  <button
+                                    onClick={e => {
+                                      e.stopPropagation()
+                                      console.log(
+                                        'Edit from dropdown clicked (card view) for:',
+                                        member.id
+                                      )
+                                      handleEditMember(member.id)
+                                      setOpenDropdown(null)
+                                    }}
+                                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                  >
+                                    編輯資料
+                                  </button>
+
+                                  {(member.role === 'REVIEWER' ||
+                                    member.role === 'CHIEF_EDITOR') && (
+                                    <button
+                                      onClick={e => {
+                                        e.stopPropagation()
+                                        console.log(
+                                          'Review history from dropdown clicked (card view) for:',
+                                          member.id
+                                        )
+                                        handleReviewHistory(member.id)
+                                        setOpenDropdown(null)
+                                      }}
+                                      className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                    >
+                                      審稿紀錄
+                                    </button>
+                                  )}
+
+                                  <button
+                                    onClick={e => {
+                                      e.stopPropagation()
+                                      handleDeleteMember(member.id)
+                                      setOpenDropdown(null)
+                                    }}
+                                    className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                  >
+                                    刪除人員
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                  {/* 手機版人員分頁控制 */}
+                  {memberPagination.totalPages > 1 && (
+                    <div className="flex flex-col items-center gap-3 mt-6 p-4 bg-white rounded-lg border border-gray-200">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() =>
+                            handleMemberPageChange(
+                              memberPagination.currentPage - 1
+                            )
+                          }
+                          disabled={!memberPagination.hasPrevPage}
+                          className="px-3 py-2 text-sm bg-gray-100 text-gray-600 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          上一頁
+                        </button>
+
+                        <span className="px-3 py-2 text-sm text-gray-600">
+                          {memberPagination.currentPage} /{' '}
+                          {memberPagination.totalPages}
+                        </span>
+
+                        <button
+                          onClick={() =>
+                            handleMemberPageChange(
+                              memberPagination.currentPage + 1
+                            )
+                          }
+                          disabled={!memberPagination.hasNextPage}
+                          className="px-3 py-2 text-sm bg-gray-100 text-gray-600 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          下一頁
+                        </button>
+                      </div>
+
+                      <div className="text-xs text-gray-500">
+                        共 {memberPagination.total} 位成員
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </main>
+
+        {/* 編輯會議模態視窗 */}
+        {showEditConferenceModal && editingConference && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+            <div className="bg-white rounded-lg w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+              {/* 標題列 */}
+              <div className="px-6 py-4 flex items-center justify-between border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900">編輯會議</h3>
+                <button
+                  onClick={() => {
+                    setShowEditConferenceModal(false)
+                    setEditingConference(null)
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* 表單內容 */}
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    會議年份
+                  </label>
+                  <input
+                    type="number"
+                    value={editingConference.year}
+                    onChange={e =>
+                      setEditingConference({
+                        ...editingConference,
+                        year: parseInt(e.target.value) || 2025,
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                    placeholder="例如: 2025"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    會議標題
+                  </label>
+                  <input
+                    type="text"
+                    value={editingConference.title}
+                    onChange={e =>
+                      setEditingConference({
+                        ...editingConference,
+                        title: e.target.value,
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                    placeholder="請輸入會議標題"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    會議子題
+                  </label>
+                  <div className="space-y-2">
+                    {editingConference.subtopics.map((topic, index) => (
+                      <div key={index} className="flex items-center space-x-2">
+                        <input
+                          type="text"
+                          value={topic}
+                          onChange={e => {
+                            const newSubtopics = [
+                              ...editingConference.subtopics,
+                            ]
+                            newSubtopics[index] = e.target.value
+                            setEditingConference({
+                              ...editingConference,
+                              subtopics: newSubtopics,
+                            })
+                          }}
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                          placeholder="請輸入子題"
+                        />
+                        <button
+                          onClick={() => {
+                            const newSubtopics =
+                              editingConference.subtopics.filter(
+                                (_, i) => i !== index
+                              )
+                            setEditingConference({
+                              ...editingConference,
+                              subtopics: newSubtopics,
+                            })
+                          }}
+                          className="px-3 py-2 text-red-600 hover:text-red-800"
+                          disabled={editingConference.subtopics.length <= 1}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => {
+                        setEditingConference({
+                          ...editingConference,
+                          subtopics: [...editingConference.subtopics, ''],
+                        })
+                      }}
+                      className="w-full px-3 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-gray-400 hover:text-gray-600"
+                    >
+                      + 新增子題
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-3">
+                  <label className="block text-sm font-medium text-gray-700">
+                    開放狀態
+                  </label>
+                  <button
+                    onClick={() =>
+                      setEditingConference({
+                        ...editingConference,
+                        isActive: !editingConference.isActive,
+                      })
+                    }
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      editingConference.isActive
+                        ? 'bg-purple-600'
+                        : 'bg-gray-300'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        editingConference.isActive
+                          ? 'translate-x-6'
+                          : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                  <span className="text-sm text-gray-500">
+                    {editingConference.isActive ? '開放' : '關閉'}
+                  </span>
+                </div>
+              </div>
+
+              {/* 按鈕區 */}
+              <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+                <button
+                  onClick={() => {
+                    setShowEditConferenceModal(false)
+                    setEditingConference(null)
+                  }}
+                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={async () => {
+                    // 前端權限檢查
+                    if (!hasRole('CHIEF_EDITOR')) {
+                      setError('只有主編可以編輯會議')
+                      return
+                    }
+                    
+                    console.log('=== 編輯會議 - 前端權限檢查通過 ===')
+                    
+                    try {
+                      // 準備要傳送到 API 的資料
+                      const conferenceData = {
+                        year: editingConference.year,
+                        title: editingConference.title,
+                        tracks: editingConference.subtopics.reduce((acc, topic, index) => ({
+                          ...acc,
+                          [`topic_${index + 1}`]: topic
+                        }), {}),
+                        isActive: editingConference.isActive,
+                      }
+
+                      console.log('正在更新會議:', conferenceData)
+                      
+                      // 呼叫 API 更新到資料庫
+                      const response = await fetch('/api/conferences', {
+                        method: 'PUT',
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(conferenceData),
+                      })
+
+                      if (!response.ok) {
+                        const errorData = await response.json()
+                        throw new Error(errorData.error || '更新會議失敗')
+                      }
+
+                      const result = await response.json()
+                      console.log('會議更新成功:', result)
+
+                      // 重新載入會議列表和年份選單
+                      await loadConferenceList()
+                      await loadAvailableYears()
+
+                      // 關閉模態視窗並重置狀態
+                      setShowEditConferenceModal(false)
+                      setEditingConference(null)
+                      
+                      alert('會議更新成功！')
+                    } catch (error: any) {
+                      console.error('更新會議失敗:', error)
+                      setError('更新會議失敗: ' + error.message)
+                    }
+                  }}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                >
+                  儲存
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 新增會議模態視窗 */}
+        {showAddConferenceModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+            <div className="bg-white rounded-lg w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+              {/* 標題列 */}
+              <div className="px-6 py-4 flex items-center justify-between border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900">新增會議</h3>
+                <button
+                  onClick={() => {
+                    setShowAddConferenceModal(false)
+                    setNewConferenceSubtopics([''])
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* 表單內容 */}
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    會議年份
+                  </label>
+                  <input
+                    type="number"
+                    defaultValue={new Date().getFullYear()}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                    placeholder="例如: 2025"
+                    id="add-year"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    會議標題
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                    placeholder="請輸入會議標題"
+                    id="add-title"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    會議子題
+                  </label>
+                  <div className="space-y-2">
+                    {newConferenceSubtopics.map((topic, index) => (
+                      <div key={index} className="flex items-center space-x-2">
+                        <input
+                          type="text"
+                          value={topic}
+                          onChange={e => {
+                            const newSubtopics = [...newConferenceSubtopics]
+                            newSubtopics[index] = e.target.value
+                            setNewConferenceSubtopics(newSubtopics)
+                          }}
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                          placeholder="請輸入子題"
+                        />
+                        <button
+                          onClick={() => {
+                            const newSubtopics = newConferenceSubtopics.filter(
+                              (_, i) => i !== index
+                            )
+                            setNewConferenceSubtopics(newSubtopics)
+                          }}
+                          className="px-3 py-2 text-red-600 hover:text-red-800"
+                          disabled={newConferenceSubtopics.length <= 1}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => {
+                        setNewConferenceSubtopics([
+                          ...newConferenceSubtopics,
+                          '',
+                        ])
+                      }}
+                      className="w-full px-3 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-gray-400 hover:text-gray-600"
+                    >
+                      + 新增子題
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-3">
+                  <label className="block text-sm font-medium text-gray-700">
+                    開放狀態
+                  </label>
+                  <button
+                    onClick={e => {
+                      const button = e.currentTarget
+                      const isActive = button.dataset.active === 'true'
+                      button.dataset.active = (!isActive).toString()
+                      button.className = `relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        !isActive ? 'bg-purple-600' : 'bg-gray-300'
+                      }`
+                      const span = button.querySelector('span')
+                      if (span) {
+                        span.className = `inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          !isActive ? 'translate-x-6' : 'translate-x-1'
+                        }`
+                      }
+                      const statusText =
+                        button.parentElement?.querySelector('.status-text')
+                      if (statusText) {
+                        statusText.textContent = !isActive ? '開放' : '關閉'
+                      }
+                    }}
+                    data-active="true"
+                    className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors bg-purple-600"
+                    id="add-active"
+                  >
+                    <span className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-6" />
+                  </button>
+                  <span className="text-sm text-gray-500 status-text">
+                    開放
+                  </span>
+                </div>
+              </div>
+
+              {/* 按鈕區 */}
+              <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+                <button
+                  onClick={() => {
+                    setShowAddConferenceModal(false)
+                    setNewConferenceSubtopics([''])
+                  }}
+                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={async () => {
+                    // 前端權限檢查
+                    if (!hasRole('CHIEF_EDITOR')) {
+                      setError('只有主編可以新增會議')
+                      return
+                    }
+                    
+                    console.log('=== 新增會議 - 前端權限檢查通過 ===')
+                    
+                    const yearInput = document.getElementById(
+                      'add-year'
+                    ) as HTMLInputElement
+                    const titleInput = document.getElementById(
+                      'add-title'
+                    ) as HTMLInputElement
+                    const activeButton = document.getElementById(
+                      'add-active'
+                    ) as HTMLButtonElement
+
+                    const filteredSubtopics = newConferenceSubtopics.filter(
+                      topic => topic.trim() !== ''
+                    )
+
+                    // 準備要傳送到 API 的資料
+                    const year = parseInt(yearInput.value) || new Date().getFullYear()
+                    const conferenceData = {
+                      year,
+                      title: titleInput.value || '未命名會議',
+                      tracks: filteredSubtopics.length > 0 
+                        ? filteredSubtopics.reduce((acc, topic, index) => ({
+                            ...acc,
+                            [`topic_${index + 1}`]: topic
+                          }), {})
+                        : { 'default_topic': '未設定子題' },
+                      settings: {
+                        submissionDeadline: `${year}-12-31`,
+                        reviewDeadline: `${year + 1}-02-28`,
+                        notificationDate: `${year + 1}-03-15`,
+                        conferenceDate: `${year + 1}-05-15`
+                      },
+                      isActive: activeButton.dataset.active === 'true',
+                    }
+
+                    try {
+                      console.log('正在新增會議:', conferenceData)
+                      
+                      // 呼叫 API 保存到資料庫
+                      const response = await fetch('/api/conferences', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(conferenceData),
+                      })
+
+                      if (!response.ok) {
+                        const errorData = await response.json()
+                        throw new Error(errorData.error || '新增會議失敗')
+                      }
+
+                      const result = await response.json()
+                      console.log('會議新增成功:', result)
+
+                      // 重新載入會議列表和年份選單
+                      await loadConferenceList()
+                      await loadAvailableYears()
+
+                      // 自動選中新創建的會議
+                      if (result.id) {
+                        setSelectedConferenceId(result.id)
+                        setYear(result.year)
+                      }
+
+                      // 關閉模態視窗並重置狀態
+                      setShowAddConferenceModal(false)
+                      setNewConferenceSubtopics([''])
+                      
+                      alert('會議新增成功！')
+                    } catch (error: any) {
+                      console.error('新增會議失敗:', error)
+                      setError('新增會議失敗: ' + error.message)
+                    }
+                  }}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                >
+                  新增
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <Footer />
 
@@ -2768,6 +3913,523 @@ export default function EditorDashboard() {
                     </button>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 編輯人員模態視窗 */}
+        {showEditMemberModal && editingMember && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+            <div className="bg-white rounded-lg w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+              {/* 標題列 */}
+              <div className="px-6 py-4 flex items-center justify-center relative border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900">
+                  編輯人員資料
+                </h3>
+                <button
+                  onClick={handleCloseEditMemberModal}
+                  className="absolute right-6 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* 表單內容 */}
+              <div className="px-6 py-6">
+                {/* 錯誤訊息 */}
+                {error && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                    {error}
+                  </div>
+                )}
+
+                <div className="space-y-6">
+                  {/* 基本資料 */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        姓名 <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={editMemberData.name}
+                        onChange={e =>
+                          setEditMemberData(prev => ({
+                            ...prev,
+                            name: e.target.value,
+                          }))
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="請輸入姓名"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        信箱 <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="email"
+                        value={editMemberData.email}
+                        onChange={e =>
+                          setEditMemberData(prev => ({
+                            ...prev,
+                            email: e.target.value,
+                          }))
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="請輸入信箱"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        服務單位 <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={editMemberData.affiliation}
+                        onChange={e =>
+                          setEditMemberData(prev => ({
+                            ...prev,
+                            affiliation: e.target.value,
+                          }))
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="請輸入服務單位"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        職稱
+                      </label>
+                      <input
+                        type="text"
+                        value={editMemberData.position}
+                        onChange={e =>
+                          setEditMemberData(prev => ({
+                            ...prev,
+                            position: e.target.value,
+                          }))
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="請輸入職稱"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      ORCID ID
+                    </label>
+                    <input
+                      type="text"
+                      value={editMemberData.orcidId}
+                      onChange={e =>
+                        setEditMemberData(prev => ({
+                          ...prev,
+                          orcidId: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="請輸入 ORCID ID (選填)"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      角色
+                    </label>
+                    <select
+                      value={editMemberData.role}
+                      onChange={e =>
+                        setEditMemberData(prev => ({
+                          ...prev,
+                          role: e.target.value as
+                            | 'CHIEF_EDITOR'
+                            | 'EDITOR'
+                            | 'REVIEWER',
+                        }))
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="REVIEWER">審查者</option>
+                      <option value="EDITOR">編輯者</option>
+                      <option value="CHIEF_EDITOR">主編輯者</option>
+                    </select>
+                  </div>
+
+                  {/* 專業知識領域 */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                      <span className="text-red-500">*</span>
+                      專業知識領域(至多勾選五個)
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-4">
+                      {expertiseOptions.map(option => (
+                        <label
+                          key={option}
+                          className="flex items-center cursor-pointer group"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={editMemberData.expertise.includes(option)}
+                            onChange={() => handleEditExpertiseToggle(option)}
+                            disabled={
+                              editMemberData.expertise.length >= 5 &&
+                              !editMemberData.expertise.includes(option)
+                            }
+                            className="sr-only"
+                          />
+                          <div
+                            className={`w-4 h-4 border-2 rounded mr-3 flex items-center justify-center transition-colors ${
+                              editMemberData.expertise.includes(option)
+                                ? 'bg-blue-600 border-blue-600 text-white'
+                                : 'border-gray-300 group-hover:border-blue-400'
+                            }`}
+                          >
+                            {editMemberData.expertise.includes(option) && (
+                              <svg
+                                className="w-3 h-3"
+                                fill="currentColor"
+                                viewBox="0 0 20 20"
+                              >
+                                <path
+                                  fillRule="evenodd"
+                                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                  clipRule="evenodd"
+                                />
+                              </svg>
+                            )}
+                          </div>
+                          <span className="text-sm text-gray-700 group-hover:text-blue-600 transition-colors">
+                            {option}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">
+                      已選擇: {editMemberData.expertise.length} 項
+                    </p>
+                  </div>
+
+                  {/* 按鈕 */}
+                  <div className="flex gap-3 pt-6">
+                    <button
+                      onClick={handleCloseEditMemberModal}
+                      className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={handleUpdateMember}
+                      disabled={
+                        isEditingMember ||
+                        !editMemberData.name.trim() ||
+                        !editMemberData.email.trim() ||
+                        !editMemberData.affiliation.trim() ||
+                        editMemberData.expertise.length === 0
+                      }
+                      className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium"
+                    >
+                      {isEditingMember ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          更新中...
+                        </>
+                      ) : (
+                        '更新資料'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 審稿紀錄模態視窗 */}
+        {showReviewHistoryModal && reviewHistoryMember && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+            <div className="bg-white rounded-lg w-full max-w-4xl shadow-2xl max-h-[90vh] overflow-y-auto">
+              {/* 標題列 */}
+              <div className="px-6 py-4 flex items-center justify-between border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900">
+                  {reviewHistoryMember.name} 的審稿紀錄
+                </h3>
+                <button
+                  onClick={handleCloseReviewHistoryModal}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* 內容區域 */}
+              <div className="px-6 py-6">
+                {loadingReviewHistory ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="ml-3 text-gray-600">
+                      載入審稿紀錄中...
+                    </span>
+                  </div>
+                ) : reviewHistoryData.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500">
+                    <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                    <p>暫無審稿紀錄</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {reviewHistoryData.map(record => (
+                      <div
+                        key={record.id}
+                        className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <h4 className="text-lg font-medium text-gray-900 mb-2">
+                              {record.submissionTitle}
+                            </h4>
+                            <p className="text-sm text-gray-600 mb-2">
+                              作者：{record.authors.join('、')}
+                            </p>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm text-gray-600 mb-3">
+                              {record.conferenceYear && (
+                                <div>會議年份：{record.conferenceYear}</div>
+                              )}
+                              {record.track && (
+                                <div>主題軌道：{record.track}</div>
+                              )}
+                              <div>指派日期：{record.assignedDate}</div>
+                              <div>投稿日期：{record.submittedDate}</div>
+                              <div>
+                                審稿日期：{record.reviewedDate || '尚未完成'}
+                              </div>
+                              {record.dueDate && (
+                                <div>截止日期：{record.dueDate}</div>
+                              )}
+                            </div>
+
+                            {/* 審稿評分 */}
+                            {record.review?.score && (
+                              <div className="mb-2 text-sm text-gray-600">
+                                評分：{record.review.score}/10 分
+                              </div>
+                            )}
+                          </div>
+                          <div className="ml-4 flex flex-col gap-2">
+                            {/* 審稿狀態 */}
+                            <span
+                              className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                record.status === 'SUBMITTED'
+                                  ? 'bg-green-100 text-green-800'
+                                  : record.status === 'ACCEPTED'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : record.status === 'DECLINED'
+                                  ? 'bg-red-100 text-red-800'
+                                  : 'bg-yellow-100 text-yellow-800'
+                              }`}
+                            >
+                              {record.status === 'SUBMITTED'
+                                ? '已提交'
+                                : record.status === 'ACCEPTED'
+                                ? '已接受'
+                                : record.status === 'DECLINED'
+                                ? '已拒絕'
+                                : record.status === 'PENDING'
+                                ? '待處理'
+                                : record.status}
+                            </span>
+
+                            {/* 審稿建議 */}
+                            {record.decision &&
+                              record.decision !== 'pending' &&
+                              record.decision !== 'in_progress' && (
+                                <span
+                                  className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                    record.decision === 'accepted'
+                                      ? 'bg-green-100 text-green-800'
+                                      : record.decision === 'revision_required'
+                                      ? 'bg-yellow-100 text-yellow-800'
+                                      : 'bg-red-100 text-red-800'
+                                  }`}
+                                >
+                                  {record.decision === 'accepted'
+                                    ? '建議接受'
+                                    : record.decision === 'revision_required'
+                                    ? '建議修改'
+                                    : '建議拒絕'}
+                                </span>
+                              )}
+                          </div>
+                        </div>
+
+                        {/* 審稿意見 */}
+                        {(record.review?.commentToEditor ||
+                          record.review?.commentToAuthor ||
+                          record.comments) && (
+                          <div className="mt-3 space-y-2">
+                            {record.review?.commentToEditor && (
+                              <div className="p-3 bg-blue-50 rounded-lg">
+                                <h5 className="text-sm font-medium text-blue-700 mb-1">
+                                  給編輯的意見：
+                                </h5>
+                                <p className="text-sm text-blue-600">
+                                  {record.review.commentToEditor}
+                                </p>
+                              </div>
+                            )}
+                            {record.review?.commentToAuthor && (
+                              <div className="p-3 bg-gray-100 rounded-lg">
+                                <h5 className="text-sm font-medium text-gray-700 mb-1">
+                                  給作者的意見：
+                                </h5>
+                                <p className="text-sm text-gray-600">
+                                  {record.review.commentToAuthor}
+                                </p>
+                              </div>
+                            )}
+                            {record.comments &&
+                              !record.review?.commentToEditor &&
+                              !record.review?.commentToAuthor && (
+                                <div className="p-3 bg-gray-100 rounded-lg">
+                                  <h5 className="text-sm font-medium text-gray-700 mb-1">
+                                    審稿意見：
+                                  </h5>
+                                  <p className="text-sm text-gray-600">
+                                    {record.comments}
+                                  </p>
+                                </div>
+                              )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 底部按鈕 */}
+              <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
+                <button
+                  onClick={handleCloseReviewHistoryModal}
+                  className="px-6 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  關閉
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 決議模態視窗 */}
+        {showDecisionModal && currentDecisionSubmissionId && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+            <div className="bg-white rounded-lg w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+              {/* 標題列 */}
+              <div className="px-6 py-4 flex items-center justify-between border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900">編輯決議</h3>
+                <button
+                  onClick={handleCloseDecisionModal}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* 內容區域 */}
+              <div className="px-6 py-6">
+                <div className="space-y-6">
+                  {/* 決議結果選擇 */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                      決議結果 <span className="text-red-500">*</span>
+                    </label>
+                    <div className="space-y-3">
+                      <label className="flex items-center">
+                        <input
+                          type="radio"
+                          name="decision"
+                          value="ACCEPT"
+                          checked={decisionData.decision === 'ACCEPT'}
+                          onChange={(e) => setDecisionData({ ...decisionData, decision: e.target.value })}
+                          className="w-4 h-4 text-green-600 border-gray-300 focus:ring-green-500"
+                        />
+                        <span className="ml-3 text-sm text-gray-900">接受 (Accept)</span>
+                      </label>
+                      
+                      <label className="flex items-center">
+                        <input
+                          type="radio"
+                          name="decision"
+                          value="REVISE"
+                          checked={decisionData.decision === 'REVISE'}
+                          onChange={(e) => setDecisionData({ ...decisionData, decision: e.target.value })}
+                          className="w-4 h-4 text-orange-600 border-gray-300 focus:ring-orange-500"
+                        />
+                        <span className="ml-3 text-sm text-gray-900">需修改 (Revise)</span>
+                      </label>
+                      
+                      <label className="flex items-center">
+                        <input
+                          type="radio"
+                          name="decision"
+                          value="REJECT"
+                          checked={decisionData.decision === 'REJECT'}
+                          onChange={(e) => setDecisionData({ ...decisionData, decision: e.target.value })}
+                          className="w-4 h-4 text-red-600 border-gray-300 focus:ring-red-500"
+                        />
+                        <span className="ml-3 text-sm text-gray-900">拒絕 (Reject)</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* 備註說明 */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      備註說明 (將發送給作者)
+                    </label>
+                    <textarea
+                      value={decisionData.note}
+                      onChange={(e) => setDecisionData({ ...decisionData, note: e.target.value })}
+                      placeholder="請輸入決議的詳細說明或修改建議..."
+                      rows={6}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      此內容將透過電子郵件發送給投稿作者
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 按鈕區域 */}
+              <div className="px-6 py-4 border-t border-gray-200 flex gap-3">
+                <button
+                  onClick={handleCloseDecisionModal}
+                  className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleDecisionSubmit}
+                  disabled={!decisionData.decision || isMakingDecision}
+                  className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium"
+                >
+                  {isMakingDecision ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      發送中...
+                    </>
+                  ) : (
+                    '確認決議並通知作者'
+                  )}
+                </button>
               </div>
             </div>
           </div>

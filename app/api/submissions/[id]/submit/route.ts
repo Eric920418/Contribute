@@ -56,83 +56,217 @@ export async function PUT(
     }
 
     const { id } = await params
+    const draftId = id
 
     const body = await request.json()
-    const { title, abstract, track, authors } = body
-
-    // 檢查投稿是否存在且屬於當前使用者
-    const existingSubmission = await prisma.submission.findUnique({
-      where: { 
-        id,
+    console.log('提交草稿，ID:', draftId)
+    
+    // 首先檢查是否是草稿 (Draft 表格)
+    const draft = await prisma.draft.findFirst({
+      where: {
+        id: draftId,
         createdBy: session.userId
       },
       include: {
-        authors: true
+        authors: true,
+        files: true,
+        conference: true
       }
     })
 
-    if (!existingSubmission) {
-      return NextResponse.json({ error: '找不到投稿或無權限修改' }, { status: 404 })
-    }
+    if (draft) {
+      // 處理從 Draft 到 Submission 的轉換
+      const {
+        title = draft.title,
+        abstract = draft.abstract,
+        track = draft.track,
+        authors = draft.authors,
+        paperType = draft.paperType,
+        keywords = draft.keywords,
+        agreements,
+        copyrightPermission = draft.copyrightPermission,
+        formatCheck = draft.formatCheck
+      } = body
 
-    // 只有草稿狀態才能提交
-    if (existingSubmission.status !== 'DRAFT') {
-      return NextResponse.json({ error: '只有草稿狀態的投稿才能提交' }, { status: 400 })
-    }
+      // 驗證必填欄位
+      if (!title || !abstract || !track) {
+        return NextResponse.json({ error: '缺少必填欄位：標題、摘要和主題軌道' }, { status: 400 })
+      }
 
-    // 生成流水號
-    const serialNumber = generateSerialNumber()
+      if (!authors || authors.length === 0) {
+        return NextResponse.json({ error: '至少需要一位作者' }, { status: 400 })
+      }
 
-    // 使用事務更新投稿狀態並生成流水號
-    const submittedSubmission = await prisma.$transaction(async (tx) => {
-      // 刪除舊的作者資料
-      await tx.submissionAuthor.deleteMany({
-        where: { submissionId: id }
+      // 檢查是否有通訊作者
+      const hasCorrespondingAuthor = authors.some((author: any) => author.isCorresponding)
+      if (!hasCorrespondingAuthor) {
+        return NextResponse.json({ error: '必須指定一位通訊作者' }, { status: 400 })
+      }
+
+      // 生成流水號
+      const serialNumber = generateSerialNumber()
+
+      // 開始資料庫交易：從 Draft 轉移到 Submission
+      const result = await prisma.$transaction(async (tx) => {
+        // 1. 創建正式投稿
+        const submission = await tx.submission.create({
+          data: {
+            title,
+            abstract,
+            track,
+            status: 'SUBMITTED',
+            conferenceId: draft.conferenceId,
+            createdBy: session.userId,
+            submittedAt: new Date(),
+            serialNumber,
+            paperType,
+            keywords,
+            // 作者聲明
+            agreementOriginalWork: agreements?.originalWork || draft.agreementOriginalWork || false,
+            agreementNoConflictOfInterest: agreements?.noConflictOfInterest || draft.agreementNoConflictOfInterest || false,
+            agreementConsentToPublish: agreements?.consentToPublish || draft.agreementConsentToPublish || false,
+            copyrightPermission,
+            formatCheck,
+            authors: {
+              create: authors.map((author: any) => ({
+                name: author.name,
+                email: author.email,
+                affiliation: author.affiliation || author.institution,
+                isCorresponding: author.isCorresponding
+              }))
+            }
+          },
+          include: {
+            authors: true,
+            conference: true
+          }
+        })
+
+        // 2. 移動檔案從 DraftFileAsset 到 FileAsset
+        if (draft.files && draft.files.length > 0) {
+          const filePromises = draft.files.map(async (draftFile) => {
+            return tx.fileAsset.create({
+              data: {
+                submissionId: submission.id,
+                kind: draftFile.kind,
+                version: draftFile.version,
+                path: draftFile.path,
+                originalName: draftFile.originalName,
+                size: draftFile.size,
+                mimeType: draftFile.mimeType,
+                checksum: draftFile.checksum
+              }
+            })
+          })
+          
+          await Promise.all(filePromises)
+        }
+
+        // 3. 刪除草稿資料（Prisma 會自動處理 cascade 刪除）
+        await tx.draft.delete({
+          where: { id: draftId }
+        })
+
+        return submission
       })
 
-      // 更新投稿狀態為已提交，並設置流水號
-      return tx.submission.update({
-        where: { id },
-        data: {
-          title,
-          abstract,
-          track,
-          status: 'SUBMITTED',
-          serialNumber, // 假設資料庫中有 serialNumber 欄位
-          submittedAt: new Date(), // 假設資料庫中有 submittedAt 欄位
-          authors: {
-            create: authors.map((author: any) => ({
-              name: author.name,
-              email: author.email,
-              affiliation: author.institution,
-              isCorresponding: author.isCorresponding || false
-            }))
-          }
+      console.log('草稿提交成功，新投稿ID:', result.id)
+
+      // 發送電子郵件通知所有作者
+      const emailSent = await sendEmailNotification(
+        result.authors,
+        serialNumber,
+        result.title
+      )
+
+      return NextResponse.json({
+        message: '投稿提交成功',
+        submission: result,
+        serialNumber,
+        emailNotificationSent: emailSent
+      })
+
+    } else {
+      // 處理舊的 Submission 內部狀態變更邏輯（向後兼容）
+      const { title, abstract, track, authors } = body
+
+      // 檢查投稿是否存在且屬於當前使用者
+      const existingSubmission = await prisma.submission.findUnique({
+        where: { 
+          id,
+          createdBy: session.userId
         },
         include: {
-          authors: true,
-          conference: true
+          authors: true
         }
       })
-    })
 
-    // 發送電子郵件通知所有作者
-    const emailSent = await sendEmailNotification(
-      submittedSubmission.authors,
-      serialNumber,
-      submittedSubmission.title
-    )
+      if (!existingSubmission) {
+        return NextResponse.json({ error: '找不到草稿或無權限修改' }, { status: 404 })
+      }
 
-    return NextResponse.json({
-      message: '稿件提交成功',
-      submission: submittedSubmission,
-      serialNumber,
-      emailNotificationSent: emailSent
-    })
-  } catch (error) {
+      // 只有草稿狀態才能提交
+      if (existingSubmission.status !== 'DRAFT') {
+        return NextResponse.json({ error: '只有草稿狀態的投稿才能提交' }, { status: 400 })
+      }
+
+      // 生成流水號
+      const serialNumber = generateSerialNumber()
+
+      // 使用事務更新投稿狀態並生成流水號
+      const submittedSubmission = await prisma.$transaction(async (tx) => {
+        // 刪除舊的作者資料
+        await tx.submissionAuthor.deleteMany({
+          where: { submissionId: id }
+        })
+
+        // 更新投稿狀態為已提交，並設置流水號
+        return tx.submission.update({
+          where: { id },
+          data: {
+            title,
+            abstract,
+            track,
+            status: 'SUBMITTED',
+            serialNumber,
+            submittedAt: new Date(),
+            authors: {
+              create: authors.map((author: any) => ({
+                name: author.name,
+                email: author.email,
+                affiliation: author.institution,
+                isCorresponding: author.isCorresponding || false
+              }))
+            }
+          },
+          include: {
+            authors: true,
+            conference: true
+          }
+        })
+      })
+
+      // 發送電子郵件通知所有作者
+      const emailSent = await sendEmailNotification(
+        submittedSubmission.authors,
+        serialNumber,
+        submittedSubmission.title
+      )
+
+      return NextResponse.json({
+        message: '稿件提交成功',
+        submission: submittedSubmission,
+        serialNumber,
+        emailNotificationSent: emailSent
+      })
+    }
+
+  } catch (error: any) {
     console.error('提交投稿失敗:', error)
+    const errorMessage = error.message || '伺服器錯誤'
     return NextResponse.json({ 
-      error: '提交失敗: ' + (error as Error).message 
+      error: '提交失敗: ' + errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     }, { status: 500 })
   }
 }

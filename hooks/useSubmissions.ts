@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { submissionApi, type SubmissionsResponse, type Submission, type SubmissionData } from '@/lib/api/submissions'
 import { SubmissionStatus } from '@prisma/client'
 
-export const useSubmissions = (year?: number, status?: string) => {
+export const useSubmissions = (year?: number, status?: string, conferenceId?: string) => {
   const [data, setData] = useState<SubmissionsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -12,14 +12,14 @@ export const useSubmissions = (year?: number, status?: string) => {
       setLoading(true)
       setError(null)
       
-      const result = await submissionApi.getSubmissions(year, status)
+      const result = await submissionApi.getSubmissions(year, status, conferenceId)
       setData(result)
     } catch (err: any) {
       setError(err.response?.data?.error || err.message || '取得投稿列表失敗')
     } finally {
       setLoading(false)
     }
-  }, [year, status])
+  }, [year, status, conferenceId])
 
   useEffect(() => {
     fetchSubmissions()

@@ -18,30 +18,43 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
+    const conferenceId = searchParams.get('conferenceId')
     const conferenceYear = searchParams.get('year') ? parseInt(searchParams.get('year')!) : 2025
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
     const limit = Math.max(1, Math.min(50, parseInt(searchParams.get('limit') || '10'))) // 限制每頁最多50筆
 
-    // 取得會議資料
-    const conference = await prisma.conference.findFirst({
-      where: { year: conferenceYear }
-    })
-
-    if (!conference) {
-      return NextResponse.json({ error: '找不到指定年度的會議' }, { status: 404 })
+    let conference
+    
+    if (conferenceId) {
+      // 如果提供了會議ID，直接查詢該會議
+      conference = await prisma.conference.findUnique({
+        where: { id: conferenceId }
+      })
+    } else {
+      // 如果沒有會議ID，使用年份查詢（為了向後兼容）
+      conference = await prisma.conference.findFirst({
+        where: { year: conferenceYear }
+      })
     }
 
-    // 構建查詢條件 - 編輯可查看所有投稿
+    if (!conference) {
+      return NextResponse.json({ error: '找不到指定的會議' }, { status: 404 })
+    }
+
+    // 構建查詢條件 - 編輯只能查看已正式提交的投稿，不包括草稿
     const whereCondition: any = {
       conferenceId: conference.id,
-      // 只顯示已提交的稿件，排除草稿
       status: {
-        not: 'DRAFT'
+        not: 'DRAFT' // 排除草稿狀態，草稿只有作者自己能看到
       }
     }
 
+    // 如果指定了特定狀態且不是 'all'，則進一步過濾（但仍排除草稿）
     if (status && status !== 'all') {
-      whereCondition.status = status as SubmissionStatus
+      // 確保即使指定狀態，也不會包含草稿
+      if (status !== 'DRAFT') {
+        whereCondition.status = status as SubmissionStatus
+      }
     }
 
     // 計算總數
@@ -95,12 +108,14 @@ export async function GET(request: NextRequest) {
       take: limit
     })
 
-    // 統計資料
+    // 統計資料（排除草稿）
     const stats = await prisma.submission.groupBy({
       by: ['status'],
       where: {
         conferenceId: conference.id,
-        status: { not: 'DRAFT' }
+        status: {
+          not: 'DRAFT' // 編輯器統計不包含草稿
+        }
       },
       _count: true
     })

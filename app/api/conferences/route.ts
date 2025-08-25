@@ -15,11 +15,25 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const year = searchParams.get('year')
+    const conferenceId = searchParams.get('conferenceId')
     const active = searchParams.get('active')
+    
+    if (conferenceId) {
+      // 查詢特定會議ID的會議
+      const conference = await prisma.conference.findUnique({
+        where: { id: conferenceId }
+      })
+      
+      if (!conference) {
+        return NextResponse.json({ error: '找不到指定的會議' }, { status: 404 })
+      }
+      
+      return NextResponse.json(conference)
+    }
     
     if (year) {
       // 查詢特定年份的會議
-      const conference = await prisma.conference.findUnique({
+      const conference = await prisma.conference.findFirst({
         where: { year: parseInt(year) }
       })
       
@@ -69,9 +83,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  return withAuth(request, async (session) => {
+  return withAuth(request, async (request, session) => {
     // 只有主編可以創建會議
-    if (!session.user.roles?.includes('CHIEF_EDITOR')) {
+    if (!session.roles?.includes('CHIEF_EDITOR')) {
       return NextResponse.json(
         { error: '權限不足，只有主編可以創建會議' },
         { status: 403 }
@@ -81,18 +95,6 @@ export async function POST(request: NextRequest) {
     try {
       const body = await request.json()
       const validatedData = conferenceSchema.parse(body)
-      
-      // 檢查年份是否已存在
-      const existingConference = await prisma.conference.findUnique({
-        where: { year: validatedData.year }
-      })
-      
-      if (existingConference) {
-        return NextResponse.json(
-          { error: '該年份的會議已存在' },
-          { status: 400 }
-        )
-      }
       
       const conference = await prisma.conference.create({
         data: validatedData
@@ -118,9 +120,9 @@ export async function POST(request: NextRequest) {
 
 // PUT /api/conferences - 更新會議
 export async function PUT(request: NextRequest) {
-  return withAuth(request, async (session) => {
+  return withAuth(request, async (request, session) => {
     // 只有主編可以更新會議
-    if (!session.user.roles?.includes('CHIEF_EDITOR')) {
+    if (!session.roles?.includes('CHIEF_EDITOR')) {
       return NextResponse.json(
         { error: '權限不足，只有主編可以修改會議設定' },
         { status: 403 }
@@ -141,30 +143,42 @@ export async function PUT(request: NextRequest) {
       // 驗證更新資料
       const validatedData = conferenceSchema.partial().parse(updateData)
       
-      const conference = await prisma.conference.upsert({
-        where: { year },
-        create: {
-          year,
-          title: `${year} AI時代課程教學與傳播科技研討會`,
-          tracks: {
-            'ai_education': 'AI在教育中的應用',
-            'digital_learning': '數位學習與教學科技',
-            'curriculum_design': '課程設計與開發',
-            'assessment': '學習評量與分析',
-            'media_technology': '傳播科技與媒體素養',
-            'teacher_training': '教師專業發展'
-          },
-          settings: {
-            submissionDeadline: `${year}-12-31`,
-            reviewDeadline: `${year + 1}-02-28`,
-            notificationDate: `${year + 1}-03-15`,
-            conferenceDate: `${year + 1}-05-15`
-          },
-          isActive: false,
-          ...validatedData
-        },
-        update: validatedData
+      // 因為year不是unique欄位，我們需要先查找再更新或創建
+      let conference = await prisma.conference.findFirst({
+        where: { year }
       })
+      
+      if (conference) {
+        // 如果存在，更新它
+        conference = await prisma.conference.update({
+          where: { id: conference.id },
+          data: validatedData
+        })
+      } else {
+        // 如果不存在，創建新的
+        conference = await prisma.conference.create({
+          data: {
+            year,
+            title: `${year} AI時代課程教學與傳播科技研討會`,
+            tracks: {
+              'ai_education': 'AI在教育中的應用',
+              'digital_learning': '數位學習與教學科技',
+              'curriculum_design': '課程設計與開發',
+              'assessment': '學習評量與分析',
+              'media_technology': '傳播科技與媒體素養',
+              'teacher_training': '教師專業發展'
+            },
+            settings: {
+              submissionDeadline: `${year}-12-31`,
+              reviewDeadline: `${year + 1}-02-28`,
+              notificationDate: `${year + 1}-03-15`,
+              conferenceDate: `${year + 1}-05-15`
+            },
+            isActive: false,
+            ...validatedData
+          }
+        })
+      }
       
       return NextResponse.json(conference)
     } catch (error) {

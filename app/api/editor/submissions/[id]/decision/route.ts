@@ -6,9 +6,11 @@ const prisma = new PrismaClient()
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id: submissionId } = await params
+    
     const session = await getSession()
     if (!session) {
       return NextResponse.json({ error: '未授權' }, { status: 401 })
@@ -26,8 +28,6 @@ export async function POST(
       return NextResponse.json({ error: '無效的決議類型' }, { status: 400 })
     }
 
-    const submissionId = params.id
-
     // 檢查投稿是否存在
     const submission = await prisma.submission.findUnique({
       where: { id: submissionId },
@@ -44,12 +44,11 @@ export async function POST(
       return NextResponse.json({ error: '找不到指定的投稿' }, { status: 404 })
     }
 
-    // 檢查是否所有審稿都已完成（可選檢查）
+    // 檢查是否有審稿結果（對於接受決議的輕度檢查）
     const completedReviews = submission.reviewAssignments.filter(ra => ra.review?.submittedAt)
-    if (completedReviews.length === 0 && decision !== 'REJECT') {
-      return NextResponse.json({ 
-        error: '尚未有完成的審稿，無法做出接受或修改決議' 
-      }, { status: 400 })
+    if (completedReviews.length === 0 && decision === 'ACCEPT') {
+      console.warn(`Warning: Accepting submission ${submissionId} without completed reviews`)
+      // 警告但不阻止，因為編輯可能有特殊理由
     }
 
     // 建立決議記錄
