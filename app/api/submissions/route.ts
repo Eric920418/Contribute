@@ -125,26 +125,88 @@ export async function GET(request: NextRequest) {
         _count: true
       })
 
-      submissionStats = stats.reduce((acc, stat) => {
+      submissionStats = stats.reduce((acc: Record<string, number>, stat) => {
         acc[stat.status] = stat._count
         return acc
       }, {} as Record<string, number>)
     }
 
-    // 按時間排序所有投稿
-    allSubmissions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    // 去重：根據 title, abstract, conferenceId 來判斷是否為同一個稿件
+    const uniqueSubmissions: any[] = []
+    const seenKeys = new Set<string>()
+    
+    for (const submission of allSubmissions) {
+      // 創建唯一標識符：title + abstract + conferenceId 的組合
+      const uniqueKey = `${submission.title?.trim()}_${submission.abstract?.trim()}_${submission.conferenceId || ''}`
+      
+      if (!seenKeys.has(uniqueKey)) {
+        seenKeys.add(uniqueKey)
+        uniqueSubmissions.push(submission)
+      } else {
+        // 如果發現重複，優先保留正式提交的稿件（非草稿）
+        const existingIndex = uniqueSubmissions.findIndex(s => {
+          const existingKey = `${s.title?.trim()}_${s.abstract?.trim()}_${s.conferenceId || ''}`
+          return existingKey === uniqueKey
+        })
+        
+        if (existingIndex !== -1) {
+          const existing = uniqueSubmissions[existingIndex]
+          // 如果當前是正式稿件，現有的是草稿，則替換
+          if (submission.status !== 'DRAFT' && existing.status === 'DRAFT') {
+            uniqueSubmissions[existingIndex] = submission
+          }
+          // 如果兩者都是正式稿件或都是草稿，保留較新的
+          else if (new Date(submission.createdAt) > new Date(existing.createdAt)) {
+            uniqueSubmissions[existingIndex] = submission
+          }
+        }
+      }
+    }
+
+    // 按時間排序去重後的投稿
+    uniqueSubmissions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+
+    // 重新計算去重後的統計數據
+    const finalStats = {
+      draft: 0,
+      submitted: 0,
+      underReview: 0,
+      revisionRequired: 0,
+      accepted: 0,
+      rejected: 0,
+      withdrawn: 0
+    }
+
+    // 根據去重後的實際稿件重新統計
+    uniqueSubmissions.forEach(submission => {
+      switch (submission.status) {
+        case 'DRAFT':
+          finalStats.draft++
+          break
+        case 'SUBMITTED':
+          finalStats.submitted++
+          break
+        case 'UNDER_REVIEW':
+          finalStats.underReview++
+          break
+        case 'REVISION_REQUIRED':
+          finalStats.revisionRequired++
+          break
+        case 'ACCEPTED':
+          finalStats.accepted++
+          break
+        case 'REJECTED':
+          finalStats.rejected++
+          break
+        case 'WITHDRAWN':
+          finalStats.withdrawn++
+          break
+      }
+    })
 
     return NextResponse.json({
-      submissions: allSubmissions,
-      stats: {
-        draft: draftCount,
-        submitted: submissionStats['SUBMITTED'] || 0,
-        underReview: submissionStats['UNDER_REVIEW'] || 0,
-        revisionRequired: submissionStats['REVISION_REQUIRED'] || 0,
-        accepted: submissionStats['ACCEPTED'] || 0,
-        rejected: submissionStats['REJECTED'] || 0,
-        withdrawn: submissionStats['WITHDRAWN'] || 0
-      },
+      submissions: uniqueSubmissions,
+      stats: finalStats,
       conference
     })
   } catch (error) {

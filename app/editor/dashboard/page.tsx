@@ -11,6 +11,21 @@ import YearDropdown from '@/components/ui/YearDropdown'
 import { SessionData } from '@/lib/auth/session'
 import { useAuth } from '@/hooks/useAuth'
 
+// 統一稿件編號格式化函數：日期時間_亂數5碼
+const formatSubmissionNumber = (assignment: EditorAssignment): string => {
+  const date = new Date(assignment.submittedDate || assignment.assignDate || Date.now())
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  
+  // 從assignment id生成5位亂數碼（確保一致性）
+  const randomCode = assignment.id.slice(-8).toUpperCase().slice(0, 5)
+  
+  return `${year}${month}${day}${hours}${minutes}_${randomCode}`
+}
+
 interface EditorAssignment {
   id: string
   title: string
@@ -269,13 +284,6 @@ export default function EditorDashboard() {
   const [isEditingMember, setIsEditingMember] = useState(false)
 
   // 決議模態視窗相關狀態
-  const [showDecisionModal, setShowDecisionModal] = useState(false)
-  const [currentDecisionSubmissionId, setCurrentDecisionSubmissionId] = useState<string | null>(null)
-  const [decisionData, setDecisionData] = useState({
-    decision: '',
-    note: ''
-  })
-  const [isMakingDecision, setIsMakingDecision] = useState(false)
 
   // 專業知識領域選項
   const expertiseOptions = [
@@ -512,7 +520,7 @@ export default function EditorDashboard() {
   // 新增人員相關函數
   const handleAddMember = async () => {
     if (!newMemberData.name.trim() || !newMemberData.email.trim() || !newMemberData.affiliation.trim()) {
-      setError('請填寫姓名、信箱和服務單位與職稱')
+      setError('請填寫姓名、信箱和服務單位')
       return
     }
 
@@ -584,7 +592,7 @@ export default function EditorDashboard() {
   // 編輯人員相關函數
   const handleUpdateMember = async () => {
     if (!editMemberData.name.trim() || !editMemberData.email.trim() || !editMemberData.affiliation.trim()) {
-      setError('請填寫姓名、信箱和服務單位與職稱')
+      setError('請填寫姓名、信箱和服務單位')
       return
     }
 
@@ -670,7 +678,7 @@ export default function EditorDashboard() {
   // 保存但稍後啟用
   const handleSaveForLater = async () => {
     if (!newMemberData.name.trim() || !newMemberData.email.trim() || !newMemberData.affiliation.trim()) {
-      setError('請填寫姓名、信箱和服務單位與職稱')
+      setError('請填寫姓名、信箱和服務單位')
       return
     }
 
@@ -1158,65 +1166,6 @@ export default function EditorDashboard() {
 
 
 
-  const handleMakeDecision = async (assignmentId: string) => {
-    try {
-      setCurrentDecisionSubmissionId(assignmentId)
-      setShowDecisionModal(true)
-      setDecisionData({ decision: '', note: '' })
-    } catch (error: any) {
-      setError('開啟決議視窗失敗: ' + (error.response?.data?.error || error.message))
-    }
-  }
-
-  // 提交決議
-  const handleDecisionSubmit = async () => {
-    if (!currentDecisionSubmissionId || !decisionData.decision) {
-      setError('請選擇決議結果')
-      return
-    }
-
-    setIsMakingDecision(true)
-    try {
-      const response = await fetch(`/api/editor/submissions/${currentDecisionSubmissionId}/decision`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          decision: decisionData.decision,
-          note: decisionData.note.trim() || null
-        })
-      })
-
-      const result = await response.json()
-
-      if (!response.ok) {
-        throw new Error(result.error || '建立決議失敗')
-      }
-
-      // 關閉模態視窗並重置狀態
-      setShowDecisionModal(false)
-      setCurrentDecisionSubmissionId(null)
-      setDecisionData({ decision: '', note: '' })
-      
-      // 重新載入投稿列表
-      await loadSubmissions()
-      
-      alert('決議已成功建立並通知作者')
-      
-    } catch (error: any) {
-      setError('建立決議失敗: ' + (error.message || '未知錯誤'))
-    } finally {
-      setIsMakingDecision(false)
-    }
-  }
-
-  // 關閉決議模態視窗
-  const handleCloseDecisionModal = () => {
-    setShowDecisionModal(false)
-    setCurrentDecisionSubmissionId(null)
-    setDecisionData({ decision: '', note: '' })
-  }
 
   const handleDownloadPaper = async (assignmentId: string) => {
     try {
@@ -1344,19 +1293,6 @@ export default function EditorDashboard() {
                   className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                 >
                   分配審稿人
-                </button>
-              )}
-              {(assignment.status === 'under_review' ||
-                assignment.status === 'revision_required') && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleMakeDecision(assignment.id)
-                    setOpenDropdown(null)
-                  }}
-                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors"
-                >
-                  編輯決議
                 </button>
               )}
               <button
@@ -1753,11 +1689,20 @@ export default function EditorDashboard() {
                       : '會議設定'}
                   </h2>
                   
+                  {/* 新增會議按鈕 - 只在會議設定頁面顯示 */}
+                  {activeTab === 'settings' && hasRole('CHIEF_EDITOR') && (
+                    <button
+                      onClick={() => setShowAddConferenceModal(true)}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                    >
+                      新增會議
+                    </button>
+                  )}
                 </div>
 
                 {/* 篩選器 */}
                 {activeTab === 'manuscripts' && (
-                  <div className="flex items-center justify-between gap-4 w-full">
+                  <div className="flex items-center justify-end gap-4 w-full">
                   {/* 標題和搜尋控制欄 */}
                   <div className="">
                     <div className="flex flex-col sm:flex-row gap-4">
@@ -1773,31 +1718,21 @@ export default function EditorDashboard() {
                    
                     </div>
                   </div>
-                  <div className="bg-white rounded-lg ">
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { key: 'all', label: '全部' },
-                        { key: 'submitted', label: '新投稿' },
-                        { key: 'under_review', label: '審稿中' },
-                        { key: 'revision_required', label: '需修改' },
-                        { key: 'accepted', label: '已接受' },
-                        { key: 'rejected', label: '已拒絕' },
-                      ].map(({ key, label }) => (
-                        <button
-                          key={key}
-                          onClick={() =>
-                            handleManuscriptFilterChange(key as any)
-                          }
-                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                            filter === key
-                              ? 'bg-[#6366F1] text-white'
-                              : 'bg-gray-100 text-foreground hover:bg-gray-200'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
+                  <div className="bg-white rounded-lg">
+                    <select
+                      value={filter}
+                      onChange={(e) =>
+                        handleManuscriptFilterChange(e.target.value as any)
+                      }
+                      className="w-full px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-[#6366F1] focus:border-transparent hover:border-gray-300 transition-colors"
+                    >
+                      <option value="all">全部</option>
+                      <option value="submitted">新投稿</option>
+                      <option value="under_review">審稿中</option>
+                      <option value="revision_required">需修改</option>
+                      <option value="accepted">已接受</option>
+                      <option value="rejected">已拒絕</option>
+                    </select>
                   </div>
                   </div>
                 )}
@@ -1865,7 +1800,7 @@ export default function EditorDashboard() {
                       <thead className="bg-gray-50 border-b border-gray-200">
                         <tr>
                           <th
-                            className="px-3 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:bg-gray-100 transition-colors w-32"
+                            className="px-3 py-3 text-left text-sm font-medium text-gray-500 cursor-pointer hover:bg-gray-100 transition-colors "
                             onClick={() => handleSort('serialNumber')}
                           >
                             <div className="flex items-center gap-2 ">
@@ -1932,10 +1867,10 @@ export default function EditorDashboard() {
                             }
                           >
                             {/* 編號 */}
-                            <td className="px-3 py-4 text-sm text-foreground w-16">
-                              {(assignment.serialNumber || assignment.id).slice(
-                                -6
-                              )}
+                            <td className="px-3 py-4 text-sm text-foreground ">
+                              <div className="w-[100px] truncate">
+                                {formatSubmissionNumber(assignment)}
+                              </div>
                             </td>
 
                             {/* 標題 */}
@@ -2106,8 +2041,11 @@ export default function EditorDashboard() {
                             <th className="px-4 py-4 text-left text-24M font-medium text-gray-500 min-w-[200px] w-[200px]">
                               電子郵件
                             </th>
-                            <th className="px-4 py-4 text-left text-24M font-medium text-gray-500 min-w-[250px] w-[250px]">
-                              服務單位與職稱
+                            <th className="px-4 py-4 text-left text-24M font-medium text-gray-500 min-w-[180px] w-[180px]">
+                              服務單位
+                            </th>
+                            <th className="px-4 py-4 text-left text-24M font-medium text-gray-500 min-w-[120px] w-[120px]">
+                              職稱
                             </th>
                             <th className="px-4 py-4 text-left text-24M font-medium text-gray-500 min-w-[120px] w-[120px]">
                               ORCID ID
@@ -2158,12 +2096,15 @@ export default function EditorDashboard() {
                                   </div>
                                 </td>
 
-                                {/* 服務單位與職稱 */}
+                                {/* 服務單位 */}
                                 <td className="px-4 py-4">
                                   <div className="text-24M text-foreground break-words">
                                     {member.affiliation}
                                   </div>
-                                  <div className="text-xs text-gray-500 mt-1 break-words">
+                                </td>
+                                {/* 職稱 */}
+                                <td className="px-4 py-4">
+                                  <div className="text-24M text-foreground break-words">
                                     {member.position}
                                   </div>
                                 </td>
@@ -2665,8 +2606,7 @@ export default function EditorDashboard() {
                       {/* 上方區域：編號和狀態 */}
                       <div className="flex items-center justify-between mb-3">
                         <div className="text-blue-600 font-medium text-sm">
-                          #
-                          {(assignment.serialNumber || assignment.id).slice(-6)}
+                          #{formatSubmissionNumber(assignment)}
                         </div>
                         <span
                           className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${
@@ -2878,15 +2818,22 @@ export default function EditorDashboard() {
                           </div>
                         </div>
 
-                        {/* 服務單位與職稱 */}
+                        {/* 服務單位 */}
                         <div className="mb-3">
                           <div className="text-xs text-gray-500 mb-1">
-                            服務單位與職稱
+                            服務單位
                           </div>
                           <div className="text-sm text-foreground">
                             {member.affiliation}
                           </div>
-                          <div className="text-xs text-gray-500 mt-1">
+                        </div>
+                        
+                        {/* 職稱 */}
+                        <div className="mb-3">
+                          <div className="text-xs text-gray-500 mb-1">
+                            職稱
+                          </div>
+                          <div className="text-sm text-foreground">
                             {member.position}
                           </div>
                         </div>
@@ -3548,8 +3495,11 @@ export default function EditorDashboard() {
                         <div className="w-40 text-24M font-medium text-gray-500">
                           審稿人
                         </div>
-                        <div className="w-[440px] text-24M font-medium text-gray-500">
-                          服務單位與職稱
+                        <div className="w-[280px] text-24M font-medium text-gray-500">
+                          服務單位
+                        </div>
+                        <div className="w-[160px] text-24M font-medium text-gray-500">
+                          職稱
                         </div>
                         <div className="w-48 text-24M font-medium text-gray-500">
                           專業領域
@@ -3587,8 +3537,11 @@ export default function EditorDashboard() {
                               <div className="w-40 text-24M font-medium text-gray-900">
                                 {reviewer.displayName}
                               </div>
-                              <div className="w-[440px] text-24M text-gray-600">
+                              <div className="w-[280px] text-24M text-gray-600">
                                 暫無服務單位資料
+                              </div>
+                              <div className="w-[160px] text-24M text-gray-600">
+                                暫無職稱資料
                               </div>
                               <div className="w-48 text-24M text-gray-600">
                                 {reviewer.expertise.length > 0
@@ -3754,11 +3707,11 @@ export default function EditorDashboard() {
                     </div>
                   </div>
 
-                  {/* 第二行：服務單位與職稱和ORCID ID */}
-                  <div className="grid grid-cols-2 gap-4">
+                  {/* 第二行：服務單位、職稱和ORCID ID */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-900 mb-1">
-                        <span className="text-red-500">*</span>服務單位與職稱
+                        <span className="text-red-500">*</span>服務單位
                       </label>
                       <input
                         type="text"
@@ -3770,7 +3723,24 @@ export default function EditorDashboard() {
                           })
                         }
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="服務單位與職稱"
+                        placeholder="請輸入服務單位"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-1">
+                        職稱
+                      </label>
+                      <input
+                        type="text"
+                        value={newMemberData.position}
+                        onChange={e =>
+                          setNewMemberData({
+                            ...newMemberData,
+                            position: e.target.value,
+                          })
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="請輸入職稱"
                       />
                     </div>
                     <div>
@@ -4327,113 +4297,6 @@ export default function EditorDashboard() {
           </div>
         )}
 
-        {/* 決議模態視窗 */}
-        {showDecisionModal && currentDecisionSubmissionId && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
-            <div className="bg-white rounded-lg w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
-              {/* 標題列 */}
-              <div className="px-6 py-4 flex items-center justify-between border-b border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900">編輯決議</h3>
-                <button
-                  onClick={handleCloseDecisionModal}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* 內容區域 */}
-              <div className="px-6 py-6">
-                <div className="space-y-6">
-                  {/* 決議結果選擇 */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">
-                      決議結果 <span className="text-red-500">*</span>
-                    </label>
-                    <div className="space-y-3">
-                      <label className="flex items-center">
-                        <input
-                          type="radio"
-                          name="decision"
-                          value="ACCEPT"
-                          checked={decisionData.decision === 'ACCEPT'}
-                          onChange={(e) => setDecisionData({ ...decisionData, decision: e.target.value })}
-                          className="w-4 h-4 text-green-600 border-gray-300 focus:ring-green-500"
-                        />
-                        <span className="ml-3 text-sm text-gray-900">接受 (Accept)</span>
-                      </label>
-                      
-                      <label className="flex items-center">
-                        <input
-                          type="radio"
-                          name="decision"
-                          value="REVISE"
-                          checked={decisionData.decision === 'REVISE'}
-                          onChange={(e) => setDecisionData({ ...decisionData, decision: e.target.value })}
-                          className="w-4 h-4 text-orange-600 border-gray-300 focus:ring-orange-500"
-                        />
-                        <span className="ml-3 text-sm text-gray-900">需修改 (Revise)</span>
-                      </label>
-                      
-                      <label className="flex items-center">
-                        <input
-                          type="radio"
-                          name="decision"
-                          value="REJECT"
-                          checked={decisionData.decision === 'REJECT'}
-                          onChange={(e) => setDecisionData({ ...decisionData, decision: e.target.value })}
-                          className="w-4 h-4 text-red-600 border-gray-300 focus:ring-red-500"
-                        />
-                        <span className="ml-3 text-sm text-gray-900">拒絕 (Reject)</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* 備註說明 */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      備註說明 (將發送給作者)
-                    </label>
-                    <textarea
-                      value={decisionData.note}
-                      onChange={(e) => setDecisionData({ ...decisionData, note: e.target.value })}
-                      placeholder="請輸入決議的詳細說明或修改建議..."
-                      rows={6}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      此內容將透過電子郵件發送給投稿作者
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* 按鈕區域 */}
-              <div className="px-6 py-4 border-t border-gray-200 flex gap-3">
-                <button
-                  onClick={handleCloseDecisionModal}
-                  className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleDecisionSubmit}
-                  disabled={!decisionData.decision || isMakingDecision}
-                  className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium"
-                >
-                  {isMakingDecision ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      發送中...
-                    </>
-                  ) : (
-                    '確認決議並通知作者'
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </ProtectedRoute>
   )

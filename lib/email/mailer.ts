@@ -47,6 +47,18 @@ export interface ReviewerAssignmentEmailData {
   appUrl: string
 }
 
+export interface DecisionResultEmailData {
+  to: string
+  authorName: string
+  submissionTitle: string
+  submissionId: string
+  decision: 'ACCEPT' | 'REJECT' | 'REVISE'
+  note?: string
+  dashboardUrl: string
+  appName: string
+  appUrl: string
+}
+
 export class EmailService {
   private transporter: nodemailer.Transporter
   private config: EmailConfig
@@ -138,6 +150,29 @@ export class EmailService {
         subject: `${data.appName} - 新的審稿任務：${data.submissionTitle}`,
         text: textContent,
         html: htmlContent
+      }
+
+      const result = await this.transporter.sendMail(mailOptions)
+
+      return true
+    } catch (error) {
+      return false
+    }
+  }
+
+  async sendDecisionResultEmail(data: DecisionResultEmailData): Promise<boolean> {
+    try {
+      const textContent = this.generateDecisionResultEmailText(data)
+
+      const decisionText = data.decision === 'ACCEPT' ? '接受' : 
+                          data.decision === 'REJECT' ? '拒絕' : '需修改後重新提交'
+
+      const mailOptions = {
+        from: this.config.from,
+        to: data.to,
+        subject: `${data.appName} - 稿件審查結果：${decisionText}`,
+        text: textContent
+        // 移除html欄位，只發送純文字
       }
 
       const result = await this.transporter.sendMail(mailOptions)
@@ -782,6 +817,194 @@ ${data.dashboardUrl}
 
 ${data.appUrl}
 `
+  }
+
+  private generateDecisionResultEmailHTML(data: DecisionResultEmailData): string {
+    const decisionText = data.decision === 'ACCEPT' ? '接受' : 
+                        data.decision === 'REJECT' ? '拒絕' : '需修改後重新提交'
+    const decisionColor = data.decision === 'ACCEPT' ? '#10B981' : 
+                         data.decision === 'REJECT' ? '#EF4444' : '#F59E0B'
+    const bgColor = data.decision === 'ACCEPT' ? '#ECFDF5' : 
+                   data.decision === 'REJECT' ? '#FEF2F2' : '#FFFBEB'
+    
+    return `
+<!DOCTYPE html>
+<html lang="zh-TW" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>稿件審查結果</title>
+  <style>
+    body { margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; }
+    .email-wrapper { max-width: 600px; margin: 0 auto; background: #ffffff; }
+    .header { background: ${decisionColor}; padding: 40px 20px; text-align: center; }
+    .header h1 { color: #ffffff; margin: 0; font-size: 28px; font-weight: 600; }
+    .content { padding: 40px 20px; }
+    .greeting { font-size: 20px; color: #333333; margin-bottom: 20px; }
+    .message { font-size: 16px; color: #666666; line-height: 1.6; margin-bottom: 30px; }
+    .decision-box { 
+      background: ${bgColor}; 
+      border: 2px solid ${decisionColor}; 
+      border-radius: 8px; 
+      padding: 20px; 
+      margin: 30px 0; 
+      text-align: center;
+    }
+    .decision-result { 
+      font-size: 24px; 
+      font-weight: bold; 
+      color: ${decisionColor}; 
+      margin-bottom: 10px;
+    }
+    .submission-box { 
+      background: #f8f9fa; 
+      border: 1px solid #dee2e6; 
+      border-radius: 8px; 
+      padding: 20px; 
+      margin: 20px 0; 
+    }
+    .submission-item { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: flex-start; 
+      margin: 10px 0; 
+      padding: 8px 0; 
+      border-bottom: 1px solid #e9ecef;
+    }
+    .submission-item:last-child { border-bottom: none; }
+    .submission-label { 
+      font-weight: bold; 
+      color: #333333; 
+      min-width: 100px;
+    }
+    .submission-value { 
+      color: #666666; 
+      flex: 1;
+      margin-left: 15px;
+    }
+    .note-box {
+      background: #f8f9fa;
+      border-left: 4px solid ${decisionColor};
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 0 4px 4px 0;
+    }
+    .dashboard-button { 
+      background: ${decisionColor}; 
+      color: #ffffff; 
+      text-decoration: none; 
+      padding: 15px 30px; 
+      border-radius: 8px; 
+      display: inline-block; 
+      font-weight: bold; 
+      margin: 20px 0;
+    }
+    .footer { 
+      background: #f8f9fa; 
+      padding: 20px; 
+      text-align: center; 
+      color: #666666; 
+      font-size: 12px; 
+    }
+    .footer a { color: ${decisionColor}; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="email-wrapper">
+    <div class="header">
+      <h1>${data.appName}</h1>
+    </div>
+    
+    <div class="content">
+      <div class="greeting">親愛的 ${data.authorName} 作者，您好！</div>
+      
+      <div class="message">
+        您的稿件審查結果已經出爐，詳細資訊如下：
+      </div>
+      
+      <div class="decision-box">
+        <div class="decision-result">審查結果：${decisionText}</div>
+      </div>
+      
+      <div class="submission-box">
+        <div class="submission-item">
+          <span class="submission-label">稿件標題：</span>
+          <span class="submission-value">${data.submissionTitle}</span>
+        </div>
+        <div class="submission-item">
+          <span class="submission-label">稿件編號：</span>
+          <span class="submission-value">${data.submissionId}</span>
+        </div>
+      </div>
+      
+      ${data.note ? `
+      <div class="note-box">
+        <strong>編輯意見：</strong><br>
+        ${data.note.replace(/\n/g, '<br>')}
+      </div>
+      ` : ''}
+      
+      <div style="text-align: center;">
+        <a href="${data.dashboardUrl}" class="dashboard-button" style="color: white;">查看完整結果</a>
+      </div>
+      
+      <div class="message">
+        ${data.decision === 'ACCEPT' ? 
+          '恭喜您！您的稿件已被接受。請留意後續發表相關通知。' :
+          data.decision === 'REJECT' ? 
+          '很抱歉，您的稿件未能通過審查。感謝您對研討會的投稿。' :
+          '請根據審查意見修改您的稿件，並重新提交。期待您的修改版本。'
+        }
+      </div>
+    </div>
+    
+    <div class="footer">
+      <p>此郵件由 <a href="${data.appUrl}">${data.appName}</a> 自動發送，請勿回覆</p>
+      <p>如有問題，請聯繫編輯團隊</p>
+    </div>
+  </div>
+</body>
+</html>`
+  }
+
+  private generateDecisionResultEmailText(data: DecisionResultEmailData): string {
+    const decisionText = data.decision === 'ACCEPT' ? '接受' : 
+                        data.decision === 'REJECT' ? '拒絕' : '需修改後重新提交'
+    
+    return `${data.appName} - 稿件審查結果通知
+
+親愛的 ${data.authorName} 作者，您好！
+
+您的稿件審查結果已經出爐，詳細資訊如下：
+
+════════════════════════════════════════
+【審查結果】${decisionText}
+════════════════════════════════════════
+
+【稿件資訊】
+稿件標題：${data.submissionTitle}
+稿件編號：${data.submissionId}
+
+${data.note ? `【編輯意見】
+${data.note}
+
+` : ''}【系統連結】
+請前往系統查看完整結果：${data.dashboardUrl}
+
+【後續說明】
+${data.decision === 'ACCEPT' ? 
+  '恭喜您！您的稿件已被接受。請留意後續發表相關通知。' :
+  data.decision === 'REJECT' ? 
+  '很抱歉，您的稿件未能通過審查。感謝您對研討會的投稿。' :
+  '請根據審查意見修改您的稿件，並重新提交。期待您的修改版本。'
+}
+
+────────────────────────────────────────
+此郵件由 ${data.appName} 自動發送，請勿回覆。
+如有問題，請聯繫編輯團隊。
+
+系統網址：${data.appUrl}`
   }
 
   async testConnection(): Promise<boolean> {

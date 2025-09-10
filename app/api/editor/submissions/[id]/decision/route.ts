@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { PrismaClient, DecisionResult } from '@prisma/client'
 import { getSession } from '@/lib/auth/session'
+import { createEmailService } from '@/lib/email/mailer'
 
 const prisma = new PrismaClient()
 
@@ -36,7 +37,9 @@ export async function POST(
           include: {
             review: true
           }
-        }
+        },
+        authors: true,
+        conference: true
       }
     })
 
@@ -88,8 +91,40 @@ export async function POST(
       }
     })
 
+    // 發送決議結果郵件給通訊作者
+    try {
+      const correspondingAuthor = submission.authors.find(author => author.isCorresponding)
+      
+      if (correspondingAuthor) {
+        const emailService = createEmailService()
+        
+        const emailData = {
+          to: correspondingAuthor.email,
+          authorName: correspondingAuthor.name,
+          submissionTitle: submission.title,
+          submissionId: submission.id,
+          decision: decision as 'ACCEPT' | 'REJECT' | 'REVISE',
+          note: note || undefined,
+          dashboardUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/author`,
+          appName: submission.conference?.title || '研討會管理系統',
+          appUrl: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+        }
+
+        const emailSent = await emailService.sendDecisionResultEmail(emailData)
+        
+        if (!emailSent) {
+          console.warn(`Warning: Failed to send decision email to ${correspondingAuthor.email}`)
+        }
+      } else {
+        console.warn(`Warning: No corresponding author found for submission ${submissionId}`)
+      }
+    } catch (emailError) {
+      console.error('Error sending decision email:', emailError)
+      // 不影響決議儲存，繼續執行
+    }
+
     return NextResponse.json({
-      message: '編輯決議已保存',
+      message: '編輯決議已保存並通知投稿者',
       decision: decisionRecord
     })
   } catch (error) {

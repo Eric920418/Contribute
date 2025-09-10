@@ -177,6 +177,48 @@ export default function AuthorPage() {
     loadDraft()
   }, [])
 
+  // 恢復檔案狀態的輔助函數
+  const restoreFileStatus = async (draftId: string) => {
+    try {
+      console.log('嘗試從資料庫恢復檔案狀態，draftId:', draftId)
+      const response = await fetch(`/api/submissions/${draftId}`)
+      if (response.ok) {
+        const data = await response.json()
+        const submission = data.submission
+        
+        // 恢復已上傳的檔案狀態
+        const restoredFiles: any = {}
+        if (submission.files && submission.files.length > 0) {
+          submission.files.forEach((file: any) => {
+            if (file.kind === 'MANUSCRIPT_ANONYMOUS' && file.id && file.originalName) {
+              restoredFiles.manuscriptFile = {
+                id: file.id,
+                originalName: file.originalName,
+                size: file.size || 0,
+                version: file.version
+              }
+            } else if (file.kind === 'TITLE_PAGE' && file.id && file.originalName) {
+              restoredFiles.titlePageFile = {
+                id: file.id,
+                originalName: file.originalName,
+                size: file.size || 0,
+                version: file.version
+              }
+            }
+          })
+        }
+        setUploadedFiles(restoredFiles)
+        console.log('檔案狀態恢復成功:', restoredFiles)
+      } else {
+        console.warn('草稿不存在，清除檔案狀態')
+        setUploadedFiles({})
+      }
+    } catch (error) {
+      console.warn('無法從資料庫恢復檔案狀態:', error)
+      setUploadedFiles({})
+    }
+  }
+
   // 載入草稿功能
   const loadDraft = () => {
     try {
@@ -209,13 +251,15 @@ export default function AuthorPage() {
 
       
 
-        // IMPORTANT: 初始載入時清空檔案狀態，避免顯示不存在的檔案
-        setUploadedFiles({})
-
-        // 如果有草稿ID，設定為當前 submission ID（用於後續更新和檔案關聯）
+        // 如果有草稿ID，設定為當前 submission ID並嘗試恢復檔案狀態
         if (draftData.draftId) {
-         
           setCurrentSubmissionId(draftData.draftId)
+          
+          // 異步恢復檔案狀態
+          restoreFileStatus(draftData.draftId)
+        } else {
+          // 沒有草稿ID時，清空檔案狀態
+          setUploadedFiles({})
         }
 
        
@@ -663,6 +707,33 @@ export default function AuthorPage() {
         uploadResults.titlePageFile = titlePageData.file
       }
 
+      // 上傳檔案後，始終同步更新稿件元數據
+      if (submissionId) {
+        console.log('同步更新稿件元數據...')
+        const updatePayload = {
+          title: submissionData.title || '未命名稿件',
+          abstract: submissionData.abstract || '',
+          track: submissionData.conferenceSubject || '',
+          paperType: submissionData.paperType || '',
+          keywords: submissionData.keywords || '',
+          authors: submissionData.authors.filter(author => author.name.trim()),
+        }
+        
+        const updateResponse = await fetch(`/api/submissions/${submissionId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updatePayload),
+        })
+
+        if (!updateResponse.ok) {
+          console.warn('更新稿件元數據失敗，但檔案上傳成功')
+        } else {
+          console.log('稿件元數據同步成功')
+        }
+      }
+
       // 更新已上傳檔案狀態（保留現有的，加入新上傳的）
       setUploadedFiles(prev => ({
         ...prev,
@@ -683,23 +754,7 @@ export default function AuthorPage() {
         ...currentData,
         manuscriptFile: hasManuscriptToUpload ? null : currentData.manuscriptFile,
         titlePageFile: hasTitlePageToUpload ? null : currentData.titlePageFile,
-        // 更新檔案資訊，優先使用已上傳的檔案
-        manuscriptFileInfo: updatedUploadedFiles.manuscriptFile
-          ? {
-              name: updatedUploadedFiles.manuscriptFile.originalName,
-              size: updatedUploadedFiles.manuscriptFile.size,
-              type: 'application/pdf',
-              lastModified: Date.now(),
-            }
-          : currentData.manuscriptFileInfo,
-        titlePageFileInfo: updatedUploadedFiles.titlePageFile
-          ? {
-              name: updatedUploadedFiles.titlePageFile.originalName,
-              size: updatedUploadedFiles.titlePageFile.size,
-              type: 'application/pdf',
-              lastModified: Date.now(),
-            }
-          : currentData.titlePageFileInfo,
+        // 更新檔案資訊，優先使用已上傳的檔案（如果需要的話可以在這裡添加檔案信息）
         draftId: submissionId
       }
       
