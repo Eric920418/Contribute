@@ -35,6 +35,8 @@ model User {
   auditLogsCreated        AuditLog[]                @relation("AuditLogActor")
   passwordResetTokens     PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
+  pageContentsCreated     PageContent[]             @relation("PageContentCreatedBy")
+  pageContentsUpdated     PageContent[]             @relation("PageContentUpdatedBy")
 
   @@map("users")
 }
@@ -76,8 +78,9 @@ model Conference {
   updatedAt DateTime @updatedAt
   
   // 關聯
-  drafts      Draft[]
-  submissions Submission[]
+  drafts       Draft[]
+  submissions  Submission[]
+  pageContents PageContent[]
   
   @@map("conferences")
 }
@@ -344,6 +347,28 @@ model EmailVerificationToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("email_verification_tokens")
+}
+
+// 頁面內容管理表
+model PageContent {
+  id          String   @id @default(cuid())
+  conferenceId String  // 關聯到特定會議
+  contentType String   // 'journal', 'guidelines', 'proceedings', 'submit'
+  title       String   // 頁面標題
+  content     String   // HTML內容
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String   // 創建者ID
+  updatedBy   String?  // 最後更新者ID
+  
+  // 關聯
+  conference  Conference @relation(fields: [conferenceId], references: [id], onDelete: Cascade)
+  creator     User       @relation("PageContentCreatedBy", fields: [createdBy], references: [id])
+  updater     User?      @relation("PageContentUpdatedBy", fields: [updatedBy], references: [id])
+  
+  @@unique([conferenceId, contentType]) // 每個會議的每種內容類型只能有一個
+  @@map("page_contents")
 }
 
 // 枚舉定義

@@ -11,6 +11,21 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute'
 import { useAuth } from '@/hooks/useAuth'
 import { useSubmissions, useSubmissionMutations } from '@/hooks/useSubmissions'
 
+// 統一稿件編號格式化函數：日期時間_亂數5碼（與後台一致）
+const formatSubmissionNumber = (submission: any): string => {
+  const date = new Date(submission.submittedAt || submission.createdAt || Date.now())
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+
+  // 從submission id生成5位亂數碼（確保一致性）
+  const randomCode = submission.id.slice(-8).toUpperCase().slice(0, 5)
+
+  return `${year}${month}${day}${hours}${minutes}_${randomCode}`
+}
+
 type MenuTab = 'home' | 'submissions' | 'history' | 'completed' | 'submission'
 type SubmissionView = 'list' | 'drafts' | 'revisions'
 type HomeView =
@@ -26,7 +41,7 @@ export default function AuthorPage() {
   const { user } = useAuth()
   const [selectedConferenceId, setSelectedConferenceId] = useState<string>('')
   const [year, setYear] = useState(2025)
-  const [availableYears, setAvailableYears] = useState<{ value: number; label: string; id?: string }[]>([])
+  const [availableYears, setAvailableYears] = useState<{ value: number; label: string; id?: string; isActive?: boolean }[]>([])
   const [activeTab, setActiveTab] = useState<MenuTab>('home')
   const [submissionView, setSubmissionView] = useState<SubmissionView>('list')
   const [homeView, setHomeView] = useState<HomeView>('overview')
@@ -46,7 +61,8 @@ export default function AuthorPage() {
         const years = conferences.map((conf: any) => ({
           value: conf.year,
           label: conf.title || `${conf.year} 課程教學與傳播科技研討會`,
-          id: conf.id
+          id: conf.id,
+          isActive: conf.isActive
         })).sort((a: any, b: any) => b.value - a.value)
         
         setAvailableYears(years)
@@ -1083,6 +1099,13 @@ export default function AuthorPage() {
         return
       }
 
+      // 檢查會議是否開放
+      if (!conference?.isActive) {
+        alert('此會議目前未開放投稿，請聯繫管理員或選擇其他開放的會議')
+        setIsSubmitting(false)
+        return
+      }
+
       // 優先使用當前的 submission ID，否則查找對應的草稿
       let existingDraftId = null
       
@@ -1182,7 +1205,7 @@ export default function AuthorPage() {
     .filter(s => s.status === 'DRAFT')
     .map((submission, index) => ({
       id: submission.id,
-      no: submissions.length - index, // 簡單編號
+      no: formatSubmissionNumber(submission),
       title: submission.title,
       date: new Date(submission.createdAt).toLocaleDateString('zh-TW'),
       submission,
@@ -1367,7 +1390,7 @@ export default function AuthorPage() {
       .filter(s => s.status === 'SUBMITTED')
       .map((submission, index) => ({
         id: submission.id,
-        no: submission.serialNumber || `SUB${submission.id.slice(-6)}`,
+        no: formatSubmissionNumber(submission),
         title: submission.title,
         date: new Date(submission.createdAt).toLocaleDateString('zh-TW'),
         track: submission.track,
@@ -1491,7 +1514,7 @@ export default function AuthorPage() {
       .filter(s => s.status === 'UNDER_REVIEW')
       .map((submission, index) => ({
         id: submission.id,
-        no: submission.serialNumber || `REV${submission.id.slice(-6)}`,
+        no: formatSubmissionNumber(submission),
         title: submission.title,
         date: new Date(submission.updatedAt).toLocaleDateString('zh-TW'),
         track: submission.track,
@@ -1615,7 +1638,7 @@ export default function AuthorPage() {
       .filter(s => s.status === 'ACCEPTED')
       .map((submission, index) => ({
         id: submission.id,
-        no: submission.serialNumber || `ACC${submission.id.slice(-6)}`,
+        no: formatSubmissionNumber(submission),
         title: submission.title,
         date: new Date(submission.updatedAt).toLocaleDateString('zh-TW'),
         track: submission.track,
@@ -1739,7 +1762,7 @@ export default function AuthorPage() {
       .filter(s => s.status === 'REJECTED')
       .map((submission, index) => ({
         id: submission.id,
-        no: submission.serialNumber || `REJ${submission.id.slice(-6)}`,
+        no: formatSubmissionNumber(submission),
         title: submission.title,
         date: new Date(submission.updatedAt).toLocaleDateString('zh-TW'),
         track: submission.track,
@@ -2142,7 +2165,7 @@ export default function AuthorPage() {
                 .map((submission, index) => ({
                   id: submission.id,
                   no:
-                    submission.serialNumber || `REV${submission.id.slice(-6)}`, // 使用流水號或簡化的ID
+                    formatSubmissionNumber(submission),
                   title: submission.title,
                   date: new Date(submission.updatedAt).toLocaleDateString(
                     'zh-TW'
@@ -3861,17 +3884,26 @@ export default function AuthorPage() {
                     下一步
                   </button>
                 ) : (
-                  <button
-                    onClick={handleSubmit}
-                    disabled={isSubmitting}
-                    className={`px-6 py-2 text-white rounded-lg transition-colors ${
-                      isSubmitting 
-                        ? 'bg-gray-400 cursor-not-allowed' 
-                        : 'bg-green-600 hover:bg-green-700'
-                    }`}
-                  >
-                    {isSubmitting ? '提交中...' : '提交稿件'}
-                  </button>
+                  <div className="flex flex-col items-center gap-2">
+                    <button
+                      onClick={handleSubmit}
+                      disabled={isSubmitting || !conference?.isActive}
+                      className={`px-6 py-2 text-white rounded-lg transition-colors ${
+                        isSubmitting
+                          ? 'bg-gray-400 cursor-not-allowed'
+                          : !conference?.isActive
+                          ? 'bg-gray-400 cursor-not-allowed'
+                          : 'bg-green-600 hover:bg-green-700'
+                      }`}
+                    >
+                      {isSubmitting ? '提交中...' : !conference?.isActive ? '會議未開放' : '提交稿件'}
+                    </button>
+                    {!conference?.isActive && (
+                      <p className="text-sm text-red-600 text-center">
+                        此會議目前未開放投稿，請聯繫管理員或選擇其他開放的會議
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

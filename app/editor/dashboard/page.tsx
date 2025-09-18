@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { FileText, Clock, CheckCircle, AlertCircle, Eye, Edit3, PenTool, ArrowUpDown, ArrowUp, ArrowDown, MoreVertical, Users, Calendar, User, X } from 'lucide-react'
+import { FileText, Clock, CheckCircle, AlertCircle, Eye, Edit3, PenTool, ArrowUpDown, ArrowUp, ArrowDown, MoreVertical, Users, Calendar, User, X, Trash2 } from 'lucide-react'
 import Header from '@/components/layout/Header'
 import Footer from '@/components/layout/Footer'
 import ProtectedRoute from '@/components/auth/ProtectedRoute'
@@ -215,6 +215,17 @@ export default function EditorDashboard() {
     subtopics: string[]
     isActive: boolean
   } | null>(null)
+
+  // 會議刪除相關狀態
+  const [showDeleteConferenceModal, setShowDeleteConferenceModal] = useState(false)
+  const [deletingConference, setDeletingConference] = useState<{
+    id: string
+    year: number
+    title: string
+    submissionCount?: number
+    draftCount?: number
+  } | null>(null)
+  const [isDeletingConference, setIsDeletingConference] = useState(false)
   const [newConferenceSubtopics, setNewConferenceSubtopics] = useState<string[]>([''])
   const [manuscriptPage, setManuscriptPage] = useState(1)
   const [manuscriptPagination, setManuscriptPagination] = useState({
@@ -883,15 +894,21 @@ export default function EditorDashboard() {
       
       if (data.conferences && data.conferences.length > 0) {
         // 轉換 API 資料格式成前端需要的格式
-        const formattedConferences = data.conferences.map((conf: any, index: number) => ({
-          id: conf.id || (index + 1).toString(),
-          year: conf.year,
-          title: conf.title,
-          subtopics: conf.tracks 
-            ? Object.values(conf.tracks).filter(track => typeof track === 'string') 
-            : ['未設定子題'],
-          isActive: conf.isActive || false
-        }))
+        const formattedConferences = data.conferences.map((conf: any, index: number) => {
+          if (!conf.id) {
+            console.error('會議資料缺少ID:', conf)
+            throw new Error('會議資料格式錯誤：缺少ID')
+          }
+          return {
+            id: conf.id,
+            year: conf.year,
+            title: conf.title,
+            subtopics: conf.tracks
+              ? Object.values(conf.tracks).filter(track => typeof track === 'string')
+              : ['未設定子題'],
+            isActive: conf.isActive || false
+          }
+        })
         
         console.log('格式化後的會議列表:', formattedConferences)
         setConferenceList(formattedConferences)
@@ -1117,7 +1134,12 @@ export default function EditorDashboard() {
         },
         body: JSON.stringify({
           reviewerIds: selectedReviewers,
-          dueDate: reviewDueDate,
+          dueDate: reviewDueDate ? (() => {
+            // 計算審查截止日：回覆截止日 + 15天
+            const replyDueDate = new Date(reviewDueDate)
+            replyDueDate.setDate(replyDueDate.getDate() + 15)
+            return replyDueDate.toISOString().split('T')[0]
+          })() : null,
           invitationContent
         })
       })
@@ -1408,7 +1430,7 @@ export default function EditorDashboard() {
     return (
       <ProtectedRoute requiredRoles={['EDITOR', 'CHIEF_EDITOR']}>
         <div className="min-h-screen flex flex-col bg-white">
-          <Header currentPage="editor" />
+          <Header currentPage="editor" isEditMode={true} />
           <main className="flex-1 px-4 py-8 md:px-14 md:py-14 bg-gray-100">
             <div className="w-full md:max-w-7xl md:mx-auto">
               <div className="animate-pulse">
@@ -1431,7 +1453,7 @@ export default function EditorDashboard() {
   return (
     <ProtectedRoute requiredRoles={['EDITOR', 'CHIEF_EDITOR']}>
       <div className="min-h-screen flex flex-col bg-white">
-        <Header currentPage="editor" />
+        <Header currentPage="editor" isEditMode={true} />
 
         {/* 主內容區域 */}
         <main
@@ -2337,26 +2359,17 @@ export default function EditorDashboard() {
                                           console.log('=== 切換會議狀態 - 前端權限檢查通過 ===')
                                           
                                           try {
-                                            // 準備要傳送到 API 的資料
-                                            const conferenceData = {
-                                              year: conference.year,
-                                              title: conference.title,
-                                              tracks: conference.subtopics.reduce((acc, topic, index) => ({
-                                                ...acc,
-                                                [`topic_${index + 1}`]: topic
-                                              }), {}),
-                                              isActive: !conference.isActive, // 切換狀態
-                                            }
+                                            console.log('正在切換會議狀態，會議ID:', conference.id, '當前狀態:', conference.isActive)
 
-                                            console.log('正在切換會議狀態:', conferenceData)
-                                            
-                                            // 呼叫 API 更新到資料庫
-                                            const response = await fetch('/api/conferences', {
-                                              method: 'PUT',
+                                            // 使用PATCH方法只更新狀態，傳遞會議ID和新狀態
+                                            const response = await fetch(`/api/conferences/${conference.id}`, {
+                                              method: 'PATCH',
                                               headers: {
                                                 'Content-Type': 'application/json',
                                               },
-                                              body: JSON.stringify(conferenceData),
+                                              body: JSON.stringify({
+                                                isActive: !conference.isActive
+                                              }),
                                             })
 
                                             if (!response.ok) {
@@ -2367,8 +2380,14 @@ export default function EditorDashboard() {
                                             const result = await response.json()
                                             console.log('會議狀態切換成功:', result)
 
-                                            // 重新載入會議列表
-                                            await loadConferenceList()
+                                            // 直接更新本地狀態，避免重新載入造成UI閃爍
+                                            setConferenceList(prevList =>
+                                              prevList.map(conf =>
+                                                conf.id === conference.id
+                                                  ? { ...conf, isActive: !conf.isActive }
+                                                  : conf
+                                              )
+                                            )
                                             
                                           } catch (error: any) {
                                             console.error('切換會議狀態失敗:', error)
@@ -2391,15 +2410,61 @@ export default function EditorDashboard() {
                                       </button>
                                     </td>
                                     <td className="px-6 py-4 text-center">
-                                      <button
-                                        onClick={() => {
-                                          setEditingConference(conference)
-                                          setShowEditConferenceModal(true)
-                                        }}
-                                        className="text-gray-400 hover:text-gray-600"
-                                      >
-                                        <Edit3 className="h-5 w-5" />
-                                      </button>
+                                      <div className="flex items-center justify-center space-x-2">
+                                        <button
+                                          onClick={() => {
+                                            setEditingConference(conference)
+                                            setShowEditConferenceModal(true)
+                                          }}
+                                          className="text-gray-400 hover:text-gray-600"
+                                          title="編輯會議"
+                                        >
+                                          <Edit3 className="h-5 w-5" />
+                                        </button>
+                                        <button
+                                          onClick={async () => {
+                                            // 前端權限檢查
+                                            if (!hasRole('CHIEF_EDITOR')) {
+                                              setError('只有主編可以刪除會議')
+                                              return
+                                            }
+
+                                            try {
+                                              // 先查詢會議的詳細統計資料
+                                              console.log('正在查詢會議統計資料...')
+                                              const response = await fetch(`/api/conferences/${conference.id}`)
+
+                                              if (!response.ok) {
+                                                throw new Error('無法獲取會議詳細資料')
+                                              }
+
+                                              const conferenceData = await response.json()
+                                              console.log('會議詳細資料:', conferenceData)
+
+                                              // 計算統計資料（從返回的資料中獲取）
+                                              const submissionCount = conferenceData.submissions?.length || 0
+                                              const draftCount = conferenceData.drafts?.length || 0
+
+                                              // 設定要刪除的會議資訊，包含統計資料
+                                              setDeletingConference({
+                                                id: conference.id,
+                                                year: conference.year,
+                                                title: conference.title,
+                                                submissionCount,
+                                                draftCount
+                                              })
+                                              setShowDeleteConferenceModal(true)
+                                            } catch (error: any) {
+                                              console.error('獲取會議統計資料失敗:', error)
+                                              setError('無法獲取會議統計資料: ' + error.message)
+                                            }
+                                          }}
+                                          className="text-red-400 hover:text-red-600"
+                                          title="刪除會議"
+                                        >
+                                          <Trash2 className="h-5 w-5" />
+                                        </button>
+                                      </div>
                                     </td>
                                   </tr>
                                 ))
@@ -4291,6 +4356,183 @@ export default function EditorDashboard() {
                   className="px-6 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
                 >
                   關閉
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 刪除會議確認對話框 */}
+        {showDeleteConferenceModal && deletingConference && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4">
+            <div className="bg-white rounded-lg w-full max-w-md shadow-2xl">
+              {/* 標題列 */}
+              <div className="px-6 py-4 flex items-center justify-between border-b border-gray-200">
+                <h3 className="text-lg font-medium text-red-600 flex items-center">
+                  <Trash2 className="h-5 w-5 mr-2" />
+                  刪除會議
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowDeleteConferenceModal(false)
+                    setDeletingConference(null)
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* 內容 */}
+              <div className="px-6 py-4">
+                <div className="text-center mb-4">
+                  <div className="mx-auto w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                    <Trash2 className="w-6 h-6 text-red-600" />
+                  </div>
+                  <h4 className="text-lg font-medium text-gray-900 mb-2">
+                    確定要刪除此會議嗎？
+                  </h4>
+                  <p className="text-sm text-gray-600">
+                    此操作無法復原，將會永久刪除：
+                  </p>
+                </div>
+
+                {/* 會議資訊 */}
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                  <div className="text-sm">
+                    <div className="font-medium text-red-800 mb-1">
+                      {deletingConference.year} - {deletingConference.title}
+                    </div>
+                    <div className="text-red-600 space-y-1">
+                      <div>• 會議的所有投稿案件
+                        {deletingConference.submissionCount !== undefined && (
+                          <span className="font-bold">({deletingConference.submissionCount} 個)</span>
+                        )}
+                      </div>
+                      <div>• 會議的所有草稿
+                        {deletingConference.draftCount !== undefined && (
+                          <span className="font-bold">({deletingConference.draftCount} 個)</span>
+                        )}
+                      </div>
+                      <div>• 會議的所有審稿記錄</div>
+                      <div>• 會議的所有頁面內容</div>
+                      <div>• 相關的所有檔案資料</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 警告訊息 */}
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                  <div className="flex">
+                    <AlertCircle className="h-5 w-5 text-yellow-400 mr-2 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm text-yellow-800">
+                      <strong>警告：</strong>刪除後所有相關資料將無法復原，請謹慎操作！
+                    </div>
+                  </div>
+                </div>
+
+                {/* 重大警告 - 有投稿案件時 */}
+                {deletingConference.submissionCount !== undefined && deletingConference.submissionCount > 0 && (
+                  <div className="bg-red-100 border border-red-300 rounded-lg p-3 mb-4">
+                    <div className="flex">
+                      <AlertCircle className="h-5 w-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />
+                      <div className="text-sm text-red-800">
+                        <strong>重大警告：</strong>此會議包含 <span className="font-bold text-red-900">{deletingConference.submissionCount} 個投稿案件</span>！
+                        刪除會議將會永久失去所有投稿者的心血結晶，此操作極度危險，請務必三思！
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 確認輸入區 */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    請輸入會議年份 <span className="font-bold text-red-600">{deletingConference.year}</span> 以確認刪除：
+                  </label>
+                  <input
+                    type="text"
+                    id="deleteConfirmInput"
+                    placeholder={`請輸入 ${deletingConference.year}`}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  />
+                </div>
+              </div>
+
+              {/* 按鈕區 */}
+              <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+                <button
+                  onClick={() => {
+                    setShowDeleteConferenceModal(false)
+                    setDeletingConference(null)
+                  }}
+                  disabled={isDeletingConference}
+                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={async () => {
+                    // 檢查確認輸入
+                    const confirmInput = document.getElementById('deleteConfirmInput') as HTMLInputElement
+                    if (confirmInput?.value !== deletingConference.year.toString()) {
+                      alert('請正確輸入會議年份以確認刪除')
+                      return
+                    }
+
+                    setIsDeletingConference(true)
+
+                    try {
+                      console.log('正在刪除會議:', deletingConference.id)
+
+                      const response = await fetch(`/api/conferences/${deletingConference.id}`, {
+                        method: 'DELETE',
+                        headers: {
+                          'Content-Type': 'application/json',
+                        },
+                      })
+
+                      if (!response.ok) {
+                        const errorData = await response.json()
+                        throw new Error(errorData.error || '刪除會議失敗')
+                      }
+
+                      const result = await response.json()
+                      console.log('會議刪除成功:', result)
+
+                      // 從本地狀態中移除已刪除的會議
+                      setConferenceList(prevList =>
+                        prevList.filter(conf => conf.id !== deletingConference.id)
+                      )
+
+                      // 重新載入年份選單
+                      await loadAvailableYears()
+
+                      // 關閉對話框
+                      setShowDeleteConferenceModal(false)
+                      setDeletingConference(null)
+
+                      alert(`會議「${deletingConference.title}」及所有相關資料已成功刪除`)
+                    } catch (error: any) {
+                      console.error('刪除會議失敗:', error)
+                      setError('刪除會議失敗: ' + error.message)
+                    } finally {
+                      setIsDeletingConference(false)
+                    }
+                  }}
+                  disabled={isDeletingConference}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                >
+                  {isDeletingConference ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      刪除中...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      確認刪除
+                    </>
+                  )}
                 </button>
               </div>
             </div>

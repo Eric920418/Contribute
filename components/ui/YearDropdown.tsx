@@ -1,7 +1,7 @@
 // YearDropdown.tsx
 import { useEffect, useRef, useState } from 'react'
 
-type Option = { value: number; label: string; id?: string }
+type Option = { value: number; label: string; id?: string; isActive?: boolean }
 
 export default function YearDropdown({
   value,
@@ -43,7 +43,18 @@ export default function YearDropdown({
         onClick={() => setOpen(v => !v)}
         className="inline-flex items-center gap-2 focus:outline-none max-w-xs lg:max-w-md"
       >
-        <span className="text-28M text-[#00182C] truncate">{selected?.label || '載入中...'}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-28M text-[#00182C] truncate">{selected?.label || '載入中...'}</span>
+          {selected?.isActive !== undefined && (
+            <span className={`text-xs px-2 py-1 rounded-full ${
+              selected.isActive
+                ? 'bg-green-100 text-green-800'
+                : 'bg-red-100 text-red-800'
+            }`}>
+              {selected.isActive ? '開放' : '未開放'}
+            </span>
+          )}
+        </div>
         <svg width="48" height="48" viewBox="0 0 32 28" aria-hidden="true" className="flex-shrink-0">
           <path
             d="M7 10l5 5 5-5"
@@ -70,7 +81,18 @@ export default function YearDropdown({
               }}
               className="cursor-pointer px-3 py-2 text-slate-800 hover:bg-slate-100 text-sm leading-relaxed"
             >
-              {opt.label}
+              <div className="flex items-center justify-between">
+                <span>{opt.label}</span>
+                {opt.isActive !== undefined && (
+                  <span className={`text-xs px-2 py-1 rounded-full ${
+                    opt.isActive
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-red-100 text-red-800'
+                  }`}>
+                    {opt.isActive ? '開放' : '未開放'}
+                  </span>
+                )}
+              </div>
             </li>
           )) : (
             <li className="px-3 py-2 text-slate-400 text-sm">

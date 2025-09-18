@@ -1,22 +1,43 @@
 'use client'
 
 import Link from 'next/link'
-import { Search, Menu, X } from 'lucide-react'
+import { Search, Menu, X, Edit3 } from 'lucide-react'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 interface HeaderProps {
   currentPage?: string
+  onPageChange?: (page: string) => void
+  isEditMode?: boolean  // 是否為編輯模式
+  onEditContent?: (contentType: string) => void  // 編輯內容回調
 }
 
-export default function Header({ currentPage }: HeaderProps) {
+export default function Header({ currentPage, onPageChange, isEditMode, onEditContent }: HeaderProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const router = useRouter()
   
   const navigationItems = [
-    { label: '期刊資訊', href: '/journal' },
-    { label: '作者須知', href: '/guidelines' },
-    { label: '會議論文集', href: '/proceedings' },
-    { label: '會議論文投稿', href: '/submit', active: currentPage === 'submit' }
+    { label: '期刊資訊', key: 'journal', href: '/journal' },
+    { label: '作者須知', key: 'guidelines', href: '/guidelines' },
+    { label: '會議論文集', key: 'proceedings', href: '/proceedings' },
+    { label: '會議論文投稿', key: 'submit', href: '/submit' }
   ]
+
+  const handleNavClick = (item: any) => {
+    if (isEditMode) {
+      // 編輯模式：跳轉到編輯頁面
+      router.push(`/editor/content/edit/${item.key}`)
+    } else {
+      // 前台模式：跳轉到主頁並帶上選項參數
+      if (onPageChange) {
+        // 如果有回調函數，優先使用回調（適用於在主頁內的導航）
+        onPageChange(item.key)
+      } else {
+        // 如果沒有回調函數，跳轉到主頁並帶上選項參數
+        router.push(`/?section=${item.key}`)
+      }
+    }
+  }
 
   return (
     <header className="w-full bg-white border-b border-[#00182C26]">
@@ -34,31 +55,34 @@ export default function Header({ currentPage }: HeaderProps) {
         <div className="hidden lg:flex items-center gap-[32px]">
           <nav className="flex items-center">
             {navigationItems.map((item, index) => (
-              <Link
+              <button
                 key={index}
-                href={item.href}
-                className={`py-[32px] px-[48px] text-24M font-medium transition-colors hover:bg-author ${
-                  item.active
+                onClick={() => handleNavClick(item)}
+                className={`py-[32px] px-[48px] text-24M font-medium transition-colors hover:bg-primary hover:text-white ${
+                  currentPage === item.key
                     ? 'bg-primary text-white rounded-[8px]'
                     : 'text-foreground rounded-[8px]'
-                }`}
+                } relative`}
               >
                 {item.label}
-              </Link>
+                {isEditMode && (
+                  <Edit3 className="w-4 h-4 ml-2 inline-block opacity-60" />
+                )}
+              </button>
             ))}
           </nav>
-          <button className="w-10 h-10 flex items-center justify-center hover:bg-accent rounded-md transition-colors">
+          <button className="w-10 h-10 flex items-center justify-center hover:bg-primary rounded-md transition-colors">
             <Search className="w-5 h-5 text-foreground" />
           </button>
         </div>
 
         {/* 手機版選單按鈕 */}
         <div className="lg:hidden flex items-center gap-2">
-          <button className="w-10 h-10 flex items-center justify-center hover:bg-accent rounded-md transition-colors">
+          <button className="w-10 h-10 flex items-center justify-center hover:bg-primary rounded-md transition-colors">
             <Search className="w-5 h-5 text-foreground" />
           </button>
           <button
-            className="w-10 h-10 flex items-center justify-center hover:bg-accent rounded-md transition-colors"
+            className="w-10 h-10 flex items-center justify-center hover:bg-primary rounded-md transition-colors"
             onClick={() => setIsMenuOpen(!isMenuOpen)}
           >
             {isMenuOpen ? (
@@ -75,21 +99,27 @@ export default function Header({ currentPage }: HeaderProps) {
         <div className="lg:hidden bg-white border-t border-[#00182C26]">
           <nav className="flex flex-col">
             {navigationItems.map((item, index) => (
-              <Link
+              <button
                 key={index}
-                href={item.href}
-                className={`py-4 px-6 text-base font-medium border-b border-[#00182C26] last:border-b-0 transition-colors hover:bg-accent ${
-                  item.active ? 'bg-primary text-white' : 'text-foreground'
+                onClick={() => {
+                  handleNavClick(item)
+                  setIsMenuOpen(false)
+                }}
+                className={`py-4 px-6 text-base font-medium border-b border-[#00182C26] last:border-b-0 transition-colors hover:bg-primary text-left ${
+                  currentPage === item.key ? 'bg-primary text-white' : 'text-foreground'
                 }`}
-                onClick={() => setIsMenuOpen(false)}
               >
-                {item.label}
-              </Link>
+                <div className="flex items-center">
+                  {item.label}
+                  {isEditMode && (
+                    <Edit3 className="w-4 h-4 ml-2 opacity-60" />
+                  )}
+                </div>
+              </button>
             ))}
           </nav>
         </div>
       )}
-
     </header>
   )
 }

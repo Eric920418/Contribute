@@ -94,6 +94,7 @@ export interface SubmissionsResponse {
     year: number
     title: string
     tracks: Record<string, string>
+    isActive: boolean
   }
 }
 

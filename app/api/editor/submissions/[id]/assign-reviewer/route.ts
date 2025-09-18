@@ -5,6 +5,21 @@ import { createEmailService, ReviewerAssignmentEmailData } from '@/lib/email/mai
 
 const prisma = new PrismaClient()
 
+// 統一稿件編號格式化函數：日期時間_亂數5碼（與前台後台一致）
+const formatSubmissionNumber = (submission: any): string => {
+  const date = new Date(submission.submittedAt || submission.createdAt || Date.now())
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+
+  // 從submission id生成5位亂數碼（確保一致性）
+  const randomCode = submission.id.slice(-8).toUpperCase().slice(0, 5)
+
+  return `${year}${month}${day}${hours}${minutes}_${randomCode}`
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -35,7 +50,9 @@ export async function POST(
       select: {
         id: true,
         title: true,
-        status: true
+        status: true,
+        submittedAt: true,
+        createdAt: true
       }
     })
 
@@ -105,14 +122,17 @@ export async function POST(
     try {
       const emailService = createEmailService()
       const dashboardUrl = `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/reviewer/dashboard`
-      
+
+      // 生成格式化的稿件編號
+      const formattedSubmissionNumber = formatSubmissionNumber(submission)
+
       await Promise.all(
         reviewers.map(async (reviewer) => {
           const emailData: ReviewerAssignmentEmailData = {
             to: reviewer.email,
             reviewerName: reviewer.displayName,
             submissionTitle: submission.title,
-            submissionId: submission.id,
+            submissionId: formattedSubmissionNumber, // 使用格式化的編號
             dueDate: dueDate ? new Date(dueDate) : undefined,
             dashboardUrl,
             appName: process.env.APP_NAME || '科技學術研討會平台',

@@ -135,7 +135,7 @@ export default function SubmissionDetailPage() {
   const downloadFile = async (fileId: string, originalName: string) => {
     try {
       const response = await fetch(`/api/submissions/download?fileId=${fileId}`)
-      
+
       if (!response.ok) {
         let errorData
         try {
@@ -145,7 +145,7 @@ export default function SubmissionDetailPage() {
         }
         throw new Error(errorData.error || `檔案下載失敗 (${response.status})`)
       }
-      
+
       // 創建下載連結
       const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
@@ -159,6 +159,28 @@ export default function SubmissionDetailPage() {
     } catch (error) {
       console.error('檔案下載失敗:', error)
       alert('檔案下載失敗: ' + (error instanceof Error ? error.message : '未知錯誤'))
+    }
+  }
+
+  // 檔案預覽/在線查看函數
+  const previewFile = async (fileId: string, originalName: string) => {
+    try {
+      const response = await fetch(`/api/submissions/download?fileId=${fileId}`)
+
+      if (!response.ok) {
+        throw new Error('檔案載入失敗')
+      }
+
+      // 創建新視窗預覽
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      window.open(url, '_blank')
+
+      // 延遲清理URL（給瀏覽器時間載入）
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000)
+    } catch (error) {
+      console.error('檔案預覽失敗:', error)
+      alert('檔案預覽失敗: ' + (error instanceof Error ? error.message : '未知錯誤'))
     }
   }
   
@@ -658,12 +680,27 @@ export default function SubmissionDetailPage() {
                                           {file.size ? `${Math.round(file.size / 1024)}KB` : '-'}
                                         </td>
                                         <td className="px-4 py-3 text-sm">
-                                          <button
-                                            onClick={() => downloadFile(file.id, file.name)}
-                                            className="text-purple-600 hover:text-purple-800 font-medium"
-                                          >
-                                            下載
-                                          </button>
+                                          <div className="flex items-center gap-2">
+                                            <button
+                                              onClick={() => previewFile(file.id, file.name)}
+                                              className="text-blue-600 hover:text-blue-800 font-medium px-2 py-1 rounded border border-blue-300 hover:border-blue-500 transition-colors text-xs"
+                                              title="在新視窗預覽檔案"
+                                            >
+                                              預覽
+                                            </button>
+                                            <button
+                                              onClick={() => downloadFile(file.id, file.name)}
+                                              className="text-purple-600 hover:text-purple-800 font-medium px-2 py-1 rounded border border-purple-300 hover:border-purple-500 transition-colors text-xs"
+                                              title="下載原檔案到本機"
+                                            >
+                                              下載
+                                            </button>
+                                            <span className="text-xs text-gray-400">
+                                              {file.name.toLowerCase().endsWith('.docx') || file.name.toLowerCase().endsWith('.doc') ? 'Word檔' :
+                                               file.name.toLowerCase().endsWith('.pdf') ? 'PDF檔' :
+                                               file.name.toLowerCase().endsWith('.txt') ? '文字檔' : '檔案'}
+                                            </span>
+                                          </div>
                                         </td>
                                       </tr>
                                     ))}

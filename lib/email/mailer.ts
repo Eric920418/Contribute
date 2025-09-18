@@ -746,7 +746,7 @@ ${data.appUrl}
           <span class="submission-value">${data.submissionId}</span>
         </div>
         <div class="submission-item">
-          <span class="submission-label">截止日期：</span>
+          <span class="submission-label">審查截止日期：</span>
           <span class="submission-value">${dueDateText}</span>
         </div>
       </div>
@@ -795,7 +795,7 @@ ${data.appName} - 新的審稿任務：${data.submissionTitle}
 
 稿件標題：${data.submissionTitle}
 稿件編號：${data.submissionId}
-截止日期：${dueDateText}
+審查截止日期：${dueDateText}
 
 請前往審稿系統查看詳細內容：
 ${data.dashboardUrl}
